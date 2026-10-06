@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07090f">
+  <meta name="description" content="Hollow Milo - a dark, hand-crafted browser platform adventure.">
+  <title>Hollow Milo</title>
+  <link rel="preload" href="fonts/cinzel-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <!-- Supabase is NOT loaded here: auth.js lazy-loads vendor/supabase.js after the game is up. -->
+  <script src="config.js" defer></script>
+  <!-- deferred scripts run in this order; game.js goes last -->
+  <script src="js/scenery.js" defer></script>
+  <script src="js/gachaAnimation.js" defer></script>
+  <script src="js/gacha.js" defer></script>
+  <script src="js/auth.js" defer></script>
+  <script src="js/saveSystem.js" defer></script>
+  <script src="js/ui.js" defer></script>
+  <script src="js/metroid.js" defer></script>
+  <script src="js/game.js" defer></script>
+</head>
+<body>
+  <noscript>
+    <div class="noscript">Hollow Milo needs JavaScript enabled to run.</div>
+  </noscript>
+
+  <main id="app">
+    <section id="loading-screen" class="screen loading-screen">
+      <div class="loading-card">
+        <div class="brand-mark" aria-hidden="true">🦋</div>
+        <h1>Hollow Milo</h1>
+        <p>Descending into the deep…</p>
+        <div class="loading-track" aria-label="Loading">
+          <div id="loading-progress" class="loading-progress"></div>
+        </div>
+        <strong id="loading-percent">0%</strong>
+      </div>
+    </section>
+
+    <section id="home-screen" class="screen hidden menu-screen">
+      <div class="menu-card hero-panel">
+        <div class="eyebrow">A forgotten kingdom awaits</div>
+        <h1 class="game-title">Hollow Milo</h1>
+        <p class="subtitle">Descend through seven forgotten realms, fell their guardians, gather Geo, and awaken new vessels at the shrine.</p>
+
+        <div class="home-stats">
+          <span>◈ <b id="home-coins">0</b></span>
+          <span>Vessel: <b id="current-hero">Milo</b></span>
+          <span id="account-chip" role="button" tabindex="0" onclick="openAccount()" onkeydown="if(event.key==='Enter')openAccount()" style="cursor:pointer">👤 Guest</span>
+        </div>
+
+        <div class="menu-actions">
+          <button class="game-button" type="button" onclick="openMap()">▶ Levels</button>
+          <button class="game-button primary" type="button" onclick="openMetro()">🕳 Descend</button>
+          <button class="game-button wish" type="button" onclick="openGacha()">🕯 Wish</button>
+          <button class="game-button" type="button" onclick="openHeroes()">🕯 Vessels</button>
+          <button class="game-button" type="button" onclick="openSettings()">⚙ Settings</button>
+        </div>
+
+        <div class="controls-card">
+          <h2>Controls</h2>
+          <p><b>Descend (Metroidvania):</b> <kbd>↑</kbd> rest/talk · hold <kbd>↑</kbd>/<kbd>↓</kbd> + attack to aim · <kbd>Q</kbd> heal · <kbd>M</kbd> map · <kbd>C</kbd> charms at benches · <kbd>Esc</kbd> pause<br><b>Levels:</b> <kbd>A</kbd>/<kbd>D</kbd> or arrows: move · <kbd>Space</kbd>: jump / ladder · <kbd>F</kbd>/<kbd>J</kbd>: attack · <kbd>E</kbd>: special · <kbd>Shift</kbd>: dash</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="heroes-screen" class="screen hidden menu-screen scroll-screen">
+      <div class="content-shell">
+        <header class="screen-header">
+          <button class="back-button compact" type="button" onclick="showHome()">← Home</button>
+          <div>
+            <div class="eyebrow">Vessels</div>
+            <h1>Choose Your Vessel</h1>
+          </div>
+          <div class="coin-pill">◈ <span id="hero-coins">0</span></div>
+        </header>
+        <div id="hero-grid" class="hero-grid"></div>
+      </div>
+    </section>
+
+    <section id="settings-screen" class="screen hidden menu-screen">
+      <div class="menu-card settings-card">
+        <button class="back-button compact" type="button" onclick="showHome()">← Home</button>
+        <div class="eyebrow">Options</div>
+        <h1>Settings</h1>
+
+        <div class="setting-row">
+          <div>
+            <strong>Music</strong>
+            <p>Background music preference</p>
+          </div>
+          <button class="toggle-button" type="button" onclick="toggleSetting(this)">ON</button>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <strong>Sound</strong>
+            <p>Sound effects preference</p>
+          </div>
+          <button class="toggle-button" type="button" onclick="toggleSetting(this)">ON</button>
+        </div>
+
+        <p class="settings-note">Settings are saved locally and (if you are signed in) in your cloud save. The Music toggle also controls ambient sound.</p>
+      </div>
+    </section>
+
+    <section id="map-screen" class="screen hidden game-screen">
+      <canvas id="gameCanvas" aria-label="Hollow Milo game"></canvas>
+
+      <div class="game-hud" aria-live="polite">
+        <div class="hud-group">
+          <span class="hud-pill">❤️ <span id="health">3</span></span>
+          <div class="health-bar" aria-hidden="true">
+            <div id="health-fill" class="health-fill"></div>
+          </div>
+        </div>
+        <span class="hud-pill">◈ <span id="game-coins">0</span></span>
+        <button class="hud-button" type="button" onclick="openMap()" aria-label="Open world map">🗺 Map</button>
+      </div>
+
+      <div id="climb-message" class="climb-message hidden">Press Space to use ladder</div>
+    </section>
+  </main>
+
+  <!-- Safety net: if the game never boots (blocked script, old cache, JS error) show a way out instead of a frozen bar. -->
+  <script>
+    (function () {
+      function stuck(msg) {
+        var p = document.querySelector("#loading-screen p");
+        if (!p || window.__miloBooted) return;
+        p.innerHTML = msg + ' <a href="#" style="color:#cfd8e3" onclick="(navigator.serviceWorker?navigator.serviceWorker.getRegistrations().then(function(r){return Promise.all(r.map(function(x){return x.unregister()}))}):Promise.resolve()).then(function(){location.reload()});return false">Reload</a>';
+      }
+      setTimeout(function () { stuck("Taking longer than expected…"); }, 6000);
+      window.addEventListener("error", function (e) { stuck("Something went wrong (" + (e.message || "script error") + ")."); });
+    })();
+  </script>
+</body>
+</html>
