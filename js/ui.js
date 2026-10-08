@@ -201,9 +201,14 @@
     };
 
     function toast(msg) {
-        const t = $q("toast"); t.textContent = msg; t.classList.remove("hidden");
+        const t = $q("toast"); if (!t) return;
+        t.textContent = msg; t.classList.remove("hidden");
+        t.classList.remove("toast-in");
+        void t.offsetWidth;                    // restart the entrance animation
+        t.classList.add("toast-in");
         clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add("hidden"), 3500);
     }
+    window.showToast = toast;                  // shared with game.js (hero shop etc.)
 
     /* ---------- gacha screen ---------- */
     function renderGacha() {

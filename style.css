@@ -41,6 +41,8 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
   background:var(--panel);
   box-shadow:var(--shadow);
   backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px);
+  animation:fadeUp .5s ease backwards;
 }
 .loading-card{text-align:center}
 .brand-mark{font-size:64px;filter:drop-shadow(0 8px 12px rgba(0,0,0,.3))}
@@ -63,13 +65,16 @@ button:focus-visible{outline:3px solid #fff;outline-offset:3px}
   border:0;
   border-radius:14px;
   padding:13px 18px;
+  min-height:46px;
   color:white;
   background:#33415f;
   cursor:pointer;
   font-weight:800;
-  transition:transform .15s ease,filter .15s ease,background .15s ease;
+  transition:transform .15s ease,filter .15s ease,background .15s ease,box-shadow .15s ease;
 }
-.game-button:hover,.back-button:hover,.toggle-button:hover,.hud-button:hover{transform:translateY(-2px);filter:brightness(1.1)}
+.game-button:hover,.back-button:hover,.toggle-button:hover,.hud-button:hover{transform:translateY(-2px);filter:brightness(1.1);box-shadow:0 10px 24px rgba(0,0,0,.32)}
+.game-button:active,.back-button:active,.toggle-button:active,.hud-button:active,.level-button:active{transform:translateY(1px) scale(.97);filter:brightness(.94);box-shadow:none}
+.game-button:disabled,.back-button:disabled,.toggle-button:disabled{opacity:.55;cursor:default;transform:none;filter:none}
 .game-button.primary{background:linear-gradient(135deg,#d95862,#e47b50)}
 .controls-card{margin-top:24px;padding:16px;border-radius:16px;background:rgba(255,255,255,.05);color:var(--muted);text-align:left}
 .controls-card h2{color:white;margin:0 0 8px;font-size:1rem}
@@ -87,7 +92,13 @@ kbd{padding:2px 7px;border-radius:6px;border:1px solid var(--line);background:#1
   border-radius:22px;
   background:var(--panel);
   box-shadow:0 12px 35px rgba(0,0,0,.2);
+  animation:fadeUp .5s ease backwards;
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
 }
+.hero-card:hover{transform:translateY(-4px);box-shadow:0 22px 48px rgba(0,0,0,.34);border-color:rgba(190,210,235,.3)}
+.hero-card:nth-child(2){animation-delay:.07s}
+.hero-card:nth-child(3){animation-delay:.14s}
+.hero-card:nth-child(4){animation-delay:.21s}
 .hero-card h2{margin:12px 0 4px}
 .hero-card p{color:var(--muted);min-height:44px}
 .hero-card small{display:block;margin:10px 0 15px;color:#ffd978;font-weight:800}
@@ -142,7 +153,14 @@ kbd{padding:2px 7px;border-radius:6px;border:1px solid var(--line);background:#1
 .hud-group{display:flex;align-items:center;gap:8px}
 .health-bar{width:130px;height:15px;background:rgba(0,0,0,.45);border-radius:999px;border:1px solid rgba(255,255,255,.28);overflow:hidden}
 .health-fill{height:100%;width:100%;background:linear-gradient(90deg,#e44755,#ff7a72);transition:width .15s ease}
-.hud-button{padding:9px 13px;background:rgba(20,27,45,.82);backdrop-filter:blur(8px)}
+.hud-button{padding:9px 13px;background:rgba(20,27,45,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:0 6px 18px rgba(0,0,0,.28)}
+.hud-pill,.coin-pill{
+  background:rgba(20,27,45,.72);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  box-shadow:0 6px 18px rgba(0,0,0,.25);
+  font-weight:800;
+}
 .climb-message{
   position:absolute;
   z-index:11;
@@ -155,8 +173,8 @@ kbd{padding:2px 7px;border-radius:6px;border:1px solid var(--line);background:#1
   border:1px solid var(--line);
   font-weight:800;
 }
-#result-overlay{position:absolute;z-index:50;inset:0;display:grid;place-items:center;background:rgba(5,8,14,.72);backdrop-filter:blur(10px);padding:20px}
-.result-card{width:min(460px,100%);padding:34px;text-align:center;border:1px solid var(--line);border-radius:24px;background:var(--panel);box-shadow:var(--shadow)}
+#result-overlay{position:absolute;z-index:50;inset:0;display:grid;place-items:center;background:rgba(5,8,14,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:20px;animation:fadeUp .3s ease backwards}
+.result-card{width:min(460px,100%);padding:34px;text-align:center;border:1px solid var(--line);border-radius:24px;background:var(--panel);box-shadow:var(--shadow);animation:fadeUp .45s cubic-bezier(.2,1.15,.4,1) backwards}
 .result-icon{font-size:60px}.result-card h1{margin:10px 0}.result-card p{color:var(--muted)}
 .noscript{position:fixed;z-index:99999;inset:0;display:grid;place-items:center;background:#111827;color:white;padding:30px;text-align:center}
 @media(max-width:760px){
@@ -174,8 +192,17 @@ kbd{padding:2px 7px;border-radius:6px;border:1px solid var(--line);background:#1
   .map-title>b{grid-column:1/-1}
   .game-title{font-size:2.5rem}
 }
+/* Players who prefer minimal animation: collapse every animation to an
+   instant end-state (fill modes keep content visible) and still the mist. */
 @media(prefers-reduced-motion:reduce){
-  *{scroll-behavior:auto!important;transition:none!important}
+  *{
+    scroll-behavior:auto!important;
+    transition-duration:.01ms!important;
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    animation-delay:0s!important;
+  }
+  .menu-screen::before{animation:none!important}
 }
 
 /* =========================================================
@@ -199,7 +226,16 @@ details{margin-top:14px;text-align:left}summary{cursor:pointer;color:var(--accen
 .account-who img{width:56px;height:56px;border-radius:50%}
 .account-who h2{margin:0}
 .account-actions{display:grid;gap:10px;margin-top:14px}
-.toast{position:fixed;z-index:400;left:50%;bottom:28px;transform:translateX(-50%);padding:10px 18px;border-radius:999px;background:#222d49;border:1px solid var(--line);font-weight:700}
+.toast{
+  position:fixed;z-index:400;left:50%;bottom:28px;transform:translateX(-50%);
+  padding:12px 22px;border-radius:999px;font-weight:700;
+  background:rgba(20,27,45,.92);border:1px solid rgba(190,210,235,.28);
+  color:#e8edf3;box-shadow:0 14px 40px rgba(0,0,0,.45);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  max-width:min(520px,calc(100vw - 32px));text-align:center;
+}
+.toast-in{animation:toastIn .38s cubic-bezier(.2,1.2,.4,1)}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,16px) scale(.94)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
 
 #wish-overlay{position:fixed;inset:0;z-index:1000;background:#02030a;overflow:auto}
 #wish-overlay canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -318,10 +354,43 @@ h1,h2,.game-title,.eyebrow,.game-button,.back-button,.level-button{font-family:"
   animation:mist 40s ease-in-out infinite alternate}
 @keyframes mist{from{transform:translate3d(-4%,0,0) scale(1)}to{transform:translate3d(4%,-3%,0) scale(1.1)}}
 .menu-screen>*{position:relative}
-@media(prefers-reduced-motion:reduce){.menu-screen::before{animation:none}}
 
 /* Hollow Descent: touch controls (shown only on touch devices) */
-#metro-touch{position:absolute;inset:auto 0 0 0;height:150px;z-index:15;pointer-events:none}
-.tbtn{position:absolute;width:58px;height:58px;border-radius:50%;border:1px solid var(--line);background:rgba(20,27,45,.7);color:#e8edf3;font-size:22px;pointer-events:auto;touch-action:none;user-select:none}
-.tbtn.l{left:14px;bottom:30px}.tbtn.r{left:86px;bottom:30px}.tbtn.u{left:50px;bottom:92px;width:46px;height:46px}
-.tbtn.j{right:14px;bottom:30px}.tbtn.a{right:86px;bottom:30px}.tbtn.d{right:14px;bottom:98px}.tbtn.s{right:86px;bottom:98px}
+#metro-touch{position:absolute;inset:auto 0 0 0;height:170px;z-index:15;pointer-events:none}
+.tbtn{
+  position:absolute;width:66px;height:66px;border-radius:50%;
+  border:1px solid rgba(190,210,235,.3);background:rgba(20,27,45,.72);
+  color:#e8edf3;font-size:24px;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;
+  box-shadow:0 8px 20px rgba(0,0,0,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  transition:transform .1s ease,background .1s ease;
+}
+.tbtn:active{transform:scale(.92);background:rgba(90,120,170,.75)}
+.tbtn.l{left:12px;bottom:34px}.tbtn.r{left:92px;bottom:34px}.tbtn.u{left:52px;bottom:112px;width:54px;height:54px}
+.tbtn.j{right:12px;bottom:34px}.tbtn.a{right:92px;bottom:34px}.tbtn.d{right:12px;bottom:114px}.tbtn.s{right:92px;bottom:114px}
+
+/* =========================================================
+   POLISH PASS: entrances, responsive layout, touch comfort
+========================================================= */
+.world-card,.map-title{animation:fadeUp .5s ease backwards}
+.world-card{transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.world-card:hover{transform:translateY(-3px);box-shadow:0 20px 46px rgba(0,0,0,.36);border-color:rgba(190,210,235,.28)}
+.screen-header{animation:fadeUp .45s ease backwards}
+.level-button{transition:transform .15s ease,filter .15s ease,box-shadow .15s ease}
+.level-button:not(:disabled):hover{transform:translateY(-2px);filter:brightness(1.12);box-shadow:0 12px 28px rgba(0,0,0,.32)}
+.settings-card .setting-row:last-of-type{border-bottom:0}
+
+@media(max-width:760px){
+  .home-stats{gap:10px}
+  .home-stats span{padding:8px 12px;font-size:.92rem}
+  .game-button,.back-button,.toggle-button{min-height:48px}
+  .hud-button{min-height:44px;min-width:44px}
+  .hero-grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
+  .hero-card{padding:18px 14px}
+  .setting-row{flex-wrap:wrap;gap:12px}
+}
+@media(max-width:480px){
+  .home-stats span{font-size:.85rem;padding:7px 10px}
+  .toast{bottom:18px;padding:11px 16px;font-size:.92rem}
+  .game-hud{gap:8px}
+  .hud-pill{padding:7px 11px;font-size:.9rem}
+}

@@ -8,6 +8,21 @@ const $ = id => document.getElementById(id);
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
+/* Small toast notification (shared with ui.js). Replaces blocking alert()
+   so gameplay / menus are never interrupted. */
+function notify(msg) {
+    if (typeof window.showToast === "function") {
+        window.showToast(msg);
+        return;
+    }
+
+    const box = document.createElement("div");
+    box.className = "toast";
+    box.textContent = msg;
+    document.body.appendChild(box);
+    setTimeout(() => box.remove(), 3500);
+}
+
 /* =========================================================
    SAVE DATA
 ========================================================= */
@@ -326,6 +341,7 @@ let animationId = null;
 
 function hideScreens() {
     if (window.Metro) Metro.stop();      // leaving the Descent: stop its loop + save
+    clearInput();                        // no key may survive a screen change
     screenIds.forEach(id => {
         const screen = $(id);
 
@@ -337,6 +353,7 @@ function hideScreens() {
 
 function stopGame() {
     gameRunning = false;
+    clearInput();
     if (window.Scenery) Scenery.pauseAmbient();
 
     if (animationId) {
@@ -482,6 +499,9 @@ function toggleSetting(button) {
 
     if (title.includes("Music")) {
         save.settings.music = !save.settings.music;
+
+        /* ambience follows the toggle right away, not on the next level */
+        if (window.Scenery) Scenery.applyMusicPref(save.settings.music);
     }
 
     if (title.includes("Sound")) {
@@ -595,8 +615,10 @@ function renderHeroes() {
 
                 renderHeroes();
                 updateAllHUD();
+
+                notify(`${hero.name} joined your party!`);
             } else {
-                alert(
+                notify(
                     `You need ${hero.price - save.coins} more Geo!`
                 );
             }
@@ -834,6 +856,19 @@ let boss = null;
 const keys = {};
 const justPressed = {};
 
+/* Drop every held key / edge press. Called whenever we change screen,
+   restart a level or stop the game so no stale input "leaks" into the
+   next screen (e.g. a held Space that immediately jumps on restart). */
+function clearInput() {
+    Object.keys(keys).forEach(key => {
+        keys[key] = false;
+    });
+
+    Object.keys(justPressed).forEach(key => {
+        justPressed[key] = false;
+    });
+}
+
 /* =========================================================
    PLAYER
 ========================================================= */
@@ -900,6 +935,8 @@ function startLevel(world, level) {
 
     health = maxHealth;
 
+    clearInput();
+
     player.x = 120;
     player.y = 300;
 
@@ -916,13 +953,22 @@ function startLevel(world, level) {
     player.dashTimer = 0;
     player.abilityTimer = 0;
 
+    /* cooldowns + shield must never leak from the previous level */
+    player.attackCooldown = 0;
+    player.dashCooldown = 0;
+    player.specialCooldown = 0;
+    player.shield = false;
+
     player.checkpointX = 120;
     player.checkpointY = 300;
 
     player.direction = 1;
 
     cameraX = 0;
-    if (window.Scenery) Scenery.setWorld(world);
+    if (window.Scenery) {
+        Scenery.setWorld(world);
+        Scenery.resetCamera(cameraX);      // no particle "jump" on the first frame
+    }
 
     createLevel();
 
@@ -1478,9 +1524,27 @@ function createBoss(type) {
    INPUT
 ========================================================= */
 
+/* True when the event is typing in a form field (which needs its own
+   Space / arrow handling). Menus as a whole are covered by the
+   !gameRunning check below. */
+function isTypingTarget(target) {
+    if (!target) return false;
+    const tag = (target.tagName || "").toLowerCase();
+    return tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        target.isContentEditable;
+}
+
 window.addEventListener(
     "keydown",
     event => {
+
+        /* Menus own the keyboard: never hijack Space / arrows while the
+           game is not running (or while the user is typing). */
+        if (!gameRunning || isTypingTarget(event.target)) {
+            return;
+        }
 
         const key =
             event.key.toLowerCase();
@@ -1534,15 +1598,7 @@ window.addEventListener(
     }
 );
 
-window.addEventListener("blur", () => {
-    Object.keys(keys).forEach(key => {
-        keys[key] = false;
-    });
-
-    Object.keys(justPressed).forEach(key => {
-        justPressed[key] = false;
-    });
-});
+window.addEventListener("blur", clearInput);
 
 /* =========================================================
    SPACE / JUMP / CLIMB
@@ -3279,37 +3335,61 @@ function drawGame() {
    SKY
 ========================================================= */
 
+/* Gradients are cached: rebuilding one every frame is pure waste. */
+const skyGradientCache = { key: "", gradient: null };
+
 function drawSky() {
 
     const world =
         worlds[currentWorld];
 
-    const gradient =
-        ctx.createLinearGradient(
+    const width =
+        window.innerWidth;
+
+    const height =
+        window.innerHeight;
+
+    const key =
+        currentWorld +
+        ":" +
+        width +
+        "x" +
+        height;
+
+    if (
+        skyGradientCache.key !== key ||
+        !skyGradientCache.gradient
+    ) {
+        const gradient =
+            ctx.createLinearGradient(
+                0,
+                0,
+                0,
+                height
+            );
+
+        gradient.addColorStop(
             0,
-            0,
-            0,
-            window.innerHeight
+            world.sky1
         );
 
-    gradient.addColorStop(
-        0,
-        world.sky1
-    );
+        gradient.addColorStop(
+            1,
+            world.sky2
+        );
 
-    gradient.addColorStop(
-        1,
-        world.sky2
-    );
+        skyGradientCache.key = key;
+        skyGradientCache.gradient = gradient;
+    }
 
     ctx.fillStyle =
-        gradient;
+        skyGradientCache.gradient;
 
     ctx.fillRect(
         0,
         0,
-        window.innerWidth,
-        window.innerHeight
+        width,
+        height
     );
 }
 
@@ -4029,7 +4109,23 @@ function drawPlatforms() {
     const world =
         worlds[currentWorld];
 
+    /* skip platforms that are completely outside the viewport */
+    const viewLeft = cameraX - 40;
+    const viewRight =
+        cameraX +
+        window.innerWidth +
+        40;
+
     platforms.forEach(platform => {
+
+        if (
+            platform.x +
+                platform.width <
+                viewLeft ||
+            platform.x > viewRight
+        ) {
+            return;
+        }
 
         ctx.fillStyle =
             world.dirt;
@@ -6544,6 +6640,8 @@ function endLevel(success) {
 
     gameRunning = false;
 
+    clearInput();
+
     if (animationId) {
 
         cancelAnimationFrame(
@@ -6646,6 +6744,12 @@ function showResult(success) {
             : "TRY AGAIN";
 
     button.onclick = () => {
+
+        /* guard: the button can be clicked twice (or after a screen
+           change) while the first restart is still being set up */
+        if (!overlay.isConnected) return;
+
+        button.disabled = true;
 
         overlay.remove();
 
