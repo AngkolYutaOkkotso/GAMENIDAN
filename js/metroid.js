@@ -83,18 +83,61 @@ const Metro = (() => {
     /* ===================================================  STATE  ====== */
     let m = null;                       // = save.metro (persistent)
     let R = null, P = null, S = null;   // room, player, runtime state
-    let running = false, raf = 0, cv = null, ctx = null, scale = 1, vw = 0, vh = 0;
+    let running = false, raf = 0, cv = null, ctx = null, scale = 1, vw = 0, vh = 0, dpr = 1;
+    /* The Descent is the heaviest mode: cap the backing-store resolution
+       below the device pixel ratio so phones stay smooth (1.25x is still
+       crisp once the room art is scaled up, and costs ~2.5x fewer pixels
+       than a 2x retina buffer). */
+    const DPR_CAP = 1.25;
     const K = {};                       // input flags
     const TEST = typeof document === "undefined" || !document.getElementById("app");
 
     function ensure() {
-        if (!save.metro) save.metro = {
+        const base = {
             abilities: { dash: false, wall: false, dbl: false }, visited: ["r0"], collected: [], broken: [],
             hpMax: 5, dmg: 1, notches: 3, charms: { owned: [], on: [] }, quest: 0, bossDead: false,
             bench: { room: "r0", x: 4 * TS + TS / 2 }
         };
+        /* Normalise whatever (possibly old / corrupted) data is in the save
+           so a bad field can never crash the Descent. */
+        const raw = (save.metro && typeof save.metro === "object") ? save.metro : {};
+        const arr = (v, keep) => Array.isArray(v) ? v.filter(keep) : [];
+        const isStr = v => typeof v === "string";
+        const m2 = {
+            abilities: {
+                dash: !!(raw.abilities && raw.abilities.dash),
+                wall: !!(raw.abilities && raw.abilities.wall),
+                dbl: !!(raw.abilities && raw.abilities.dbl)
+            },
+            visited: arr(raw.visited, v => isStr(v) && !!ROOMS[v]),
+            collected: arr(raw.collected, isStr),
+            broken: arr(raw.broken, v => {
+                if (typeof v !== "string" || !ROOMS[v.split(":")[0]]) return false;
+                const mm = /^([^:]+):(\d+),(\d+)$/.exec(v);
+                return !!mm && inGrid(+mm[2], +mm[3]);
+            }),
+            hpMax: clampNum(raw.hpMax, 1, 20, base.hpMax),
+            dmg: clampNum(raw.dmg, 1, 20, base.dmg),
+            notches: clampNum(raw.notches, 0, 20, base.notches),
+            charms: {
+                owned: arr(raw.charms && raw.charms.owned, isStr),
+                on: arr(raw.charms && raw.charms.on, isStr)
+            },
+            quest: clampNum(raw.quest, 0, 99, 0),
+            bossDead: !!raw.bossDead,
+            bench: {
+                room: (raw.bench && isStr(raw.bench.room) && ROOMS[raw.bench.room]) ? raw.bench.room : base.bench.room,
+                x: clampNum(raw.bench && raw.bench.x, 0, RW, base.bench.x)
+            }
+        };
+        if (raw.geoDirty) m2.geoDirty = true;
+        if (!m2.visited.includes(m2.bench.room)) m2.visited.push(m2.bench.room);
+        if (!m2.visited.includes("r0")) m2.visited.unshift("r0");
+        save.metro = m2;
         m = save.metro; return m;
     }
+    const inGrid = (x, y) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < COLS && y >= 0 && y < ROWS;
+    const clampNum = (v, min, max, dflt) => (typeof v === "number" && isFinite(v)) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
     const hasCharm = c => m.charms.on.includes(c);
     const rnd = (a, b) => a + Math.random() * (b - a);
 
@@ -357,7 +400,16 @@ const Metro = (() => {
     function loadRoom(id, spawn) {
         R = ROOMS[id];
         R.g = mkBase(id);                                               // pristine grid: wall/door edits never leak between visits
-        m.broken.forEach(k => { const [rid, c] = k.split(":"); if (rid === id) { const [x, y] = c.split(",").map(Number); R.g[y][x] = "."; } });
+        m.broken.forEach(k => {
+            /* tolerate corrupt / outdated save entries: never touch a tile
+               that is not an actual cracked wall, never index out of range */
+            if (typeof k !== "string") return;
+            const [rid, c] = k.split(":");
+            if (rid !== id || typeof c !== "string") return;
+            const [x, y] = c.split(",").map(Number);
+            if (!inGrid(x, y) || R.g[y][x] !== "W") return;
+            R.g[y][x] = ".";
+        });
         S = Object.assign(S || {}, { enemies: [], items: [], coins: [], shots: [], eshots: [], parts: S && S.parts || [], lock: false, banner: 150, t: 0, bossRoom: false, boss: null, dialog: null });
         R.enemies.forEach(en => spawnEnemy(en.t, en.x, en.y));
         R.items.forEach(it => { if (!m.collected.includes(it.id)) S.items.push({ ...it, bob: Math.random() * 6 }); });
@@ -369,7 +421,10 @@ const Metro = (() => {
         if (spawn) { P.x = spawn.x; P.y = spawn.y; P.vx = spawn.vx || 0; P.vy = spawn.vy || 0; P.safe = { x: P.x, y: P.y }; }
         P.safeT = 0;
         renderRoomCache(); cam.x = P.x + 10 - vw / 2; cam.y = P.y - vh / 2; clampCam();
-        if (window.Scenery && !TEST && S.theme !== R.theme) { Scenery.setWorld(R.theme); }
+        if (window.Scenery && !TEST) {
+            if (S.theme !== R.theme) Scenery.setWorld(R.theme);
+            Scenery.resetCamera(cam.x * scale);          // no fog/particle lurch after a room change
+        }
         S.theme = R.theme;
     }
     const PRISTINE = {};
@@ -499,11 +554,17 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     }
     const solidIn = (x, y) => y >= 0 && y < ROWS && x >= 0 && x < COLS && (R.g[y][x] === "#" || R.g[y][x] === "W");
 
+    let skyCache = { key: "", g: null };
     function draw() {
-        const P2 = pal(), dpr = Math.min(devicePixelRatio || 1, 2);
+        const P2 = pal();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const g = ctx.createLinearGradient(0, 0, 0, vh * scale); g.addColorStop(0, P2.sky1); g.addColorStop(1, P2.sky2);
-        ctx.fillStyle = g; ctx.fillRect(0, 0, innerWidth, innerHeight);
+        /* sky gradient is rebuilt only when the world or viewport changes */
+        const skyKey = R.theme + ":" + innerWidth + "x" + innerHeight;
+        if (skyCache.key !== skyKey) {
+            const g = ctx.createLinearGradient(0, 0, 0, vh * scale); g.addColorStop(0, P2.sky1); g.addColorStop(1, P2.sky2);
+            skyCache = { key: skyKey, g };
+        }
+        ctx.fillStyle = skyCache.g; ctx.fillRect(0, 0, innerWidth, innerHeight);
         const sh = S.shake > .5 ? [rnd(-S.shake, S.shake), rnd(-S.shake, S.shake)] : [0, 0];
         ctx.save(); ctx.scale(scale, scale); ctx.translate(-Math.round(cam.x) + sh[0], -Math.round(cam.y) + sh[1]);
         ctx.drawImage(bgCache[0], cam.x * .6, cam.y * .6); ctx.drawImage(bgCache[1], cam.x * .3, cam.y * .3);
@@ -659,19 +720,39 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         document.getElementById("mb-map").onclick = () => S && (S.paused ? closePanel() : openMap());
         document.getElementById("mb-pause").onclick = () => S && (S.paused ? closePanel() : openPause());
         const t = document.getElementById("metro-touch");
-        const btn = (cls, label, key, press) => { const b = document.createElement("button"); b.className = "tbtn " + cls; b.textContent = label;
-            b.addEventListener("pointerdown", e => { e.preventDefault(); K[key] = true; if (press) K[press] = true; }); b.addEventListener("pointerup", () => K[key] = false); b.addEventListener("pointerleave", () => K[key] = false); t.appendChild(b); };
+        /* Safer pointer handling: capture the pointer on press so the
+           release is always received (even outside the button), and treat
+           cancel/leave the same as a release — no stuck input. */
+        const release = (key, press) => { K[key] = false; if (press) K[press] = false; };
+        const btn = (cls, label, key, press) => {
+            const b = document.createElement("button");
+            b.className = "tbtn " + cls; b.textContent = label;
+            b.setAttribute("aria-label", key);
+            b.addEventListener("pointerdown", e => {
+                e.preventDefault();
+                if (e.button != null && e.button !== 0 && e.pointerType === "mouse") return;
+                try { b.setPointerCapture(e.pointerId); } catch (err) {}
+                K[key] = true; if (press) K[press] = true;
+            });
+            const up = () => release(key, press);
+            b.addEventListener("pointerup", up);
+            b.addEventListener("pointercancel", up);
+            b.addEventListener("lostpointercapture", up);
+            b.addEventListener("contextmenu", e => e.preventDefault());
+            t.appendChild(b);
+        };
         btn("l", "◀", "left"); btn("r", "▶", "right"); btn("j", "⤒", "jump", "jumpP"); btn("a", "⚔", "atk", "atkP"); btn("d", "≫", "dash", "dashP"); btn("s", "✦", "sp", "spP"); btn("u", "↑", "up", "upP");
-        if ("ontouchstart" in window) t.classList.remove("hidden");
+        if ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0) t.classList.remove("hidden");
     }
 
     /* ==================================================  LOOP  ======== */
     function resize() {
-        const dpr = Math.min(devicePixelRatio || 1, 2);
+        dpr = Math.min(devicePixelRatio || 1, DPR_CAP);
         cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; scale = Math.max(.7, Math.min(1.6, innerHeight / VIEW_H));
         vw = innerWidth / scale; vh = innerHeight / scale;
     }
     function start() {
+        if (running) stop();                // never allow two loops / stale state
         ensure();
         cv = document.getElementById("metroCanvas"); ctx = cv.getContext("2d");
         S = { parts: [], shake: 0, hitstop: 0, paused: false, dead: 0 };
@@ -691,9 +772,14 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         raf = requestAnimationFrame(loop);
     }
     function stop() {
-        if (!running) return; running = false; cancelAnimationFrame(raf);
+        /* Idempotent: clean up fully even when the loop is already stopped,
+           so leaving / restarting can never strand listeners or input. */
+        const wasRunning = running;
+        running = false;
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
         removeEventListener("keydown", kd); removeEventListener("keyup", ku); removeEventListener("resize", resize);
-        if (m) { saveGame(); m.geoDirty = false; }                      // always persist on exit (Geo, visited rooms, charms)
+        Object.keys(K).forEach(k => K[k] = false);                     // no stuck touch / key state
+        if (m && (wasRunning || m.geoDirty)) { saveGame(); m.geoDirty = false; }  // persist Geo, visited rooms, charms
         const s = document.getElementById("metro-screen"); if (s) s.classList.add("hidden");
         closePanelSafe(); if (window.Scenery) Scenery.pauseAmbient();
     }
@@ -701,7 +787,13 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
 
     /* ---- init ---- */
     Object.keys(ROOMS).forEach(id => { PRISTINE[id] = ROOMS[id].g.map(r => r.slice()); });
-    if (!TEST) buildUI();
+    if (!TEST) {
+        buildUI();
+        /* Persist live Descent progress when the tab is hidden or closed. */
+        const saveIfRunning = () => { if (running && m) { saveGame(); m.geoDirty = false; } };
+        document.addEventListener("visibilitychange", () => { if (document.hidden) saveIfRunning(); });
+        addEventListener("pagehide", saveIfRunning);
+    }
 
     /* test hooks (used by tests/metro.test.js; harmless in the browser) */
     const _test = {

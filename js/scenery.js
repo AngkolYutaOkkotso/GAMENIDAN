@@ -215,9 +215,24 @@ const Scenery = (() => {
     }
     function pauseAmbient() { fadeTo(0, .4); }
 
+    /* Called when the Music toggle flips: mute / unmute right away. */
+    function applyMusicPref(on) {
+        if (!on && !ac) return;                 // nothing is playing yet
+        initAudio();
+        if (!ac) return;
+        if (on && ac.state === "suspended") ac.resume();
+        fadeTo(on ? .5 : 0, .25);
+    }
+
+    /* Reset the camera delta tracking after teleports / room changes so
+       particles and fog don't lurch across the screen on the first frame. */
+    function resetCamera(camX) {
+        lastCam = camX || 0;
+    }
+
     /* Browsers only allow audio after a user gesture. */
     ["pointerdown", "keydown"].forEach(ev => addEventListener(ev, () => { if (ac && ac.state === "suspended") ac.resume(); }, { passive: true }));
 
-    return { draw, setWorld, pauseAmbient, THEMES };
+    return { draw, setWorld, pauseAmbient, applyMusicPref, resetCamera, THEMES };
 })();
 window.Scenery = Scenery;
