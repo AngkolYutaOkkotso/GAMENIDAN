@@ -64,10 +64,10 @@
         const switchButton = $q("login-switch");
         if (!title) return;
 
-        title.textContent = signup ? "Create your account" : "Welcome back";
+        title.textContent = signup ? "Create your account" : "Sign in to Hollow Milo";
         copy.textContent = signup
-            ? "Create an account to keep your Geo, Vessels, and progress synced across devices."
-            : "Sign in to keep your Geo, Vessels, and progress synced across devices.";
+            ? "Create an account with your email to keep your Geo, Vessels, and progress synced across devices."
+            : "Continue with Google to create a new account or access your existing progress.";
         submit.textContent = signup ? "Create account" : "Log in";
         password.autocomplete = signup ? "new-password" : "current-password";
         forgot.classList.toggle("hidden", signup);
@@ -82,12 +82,13 @@
             providers.innerHTML = '<p class="auth-note">Cloud sign-in is not configured. You can still play as a guest.</p>';
         } else {
             const available = ((window.MILO_CONFIG || {}).PROVIDERS || [])
-                .filter(provider => providerNames[provider]);
+                .filter(provider => providerNames[provider])
+                .sort((a, b) => (a === "google" ? -1 : b === "google" ? 1 : 0));
             available.forEach(provider => {
                 const button = document.createElement("button");
                 button.type = "button";
-                button.className = "game-button";
-                button.textContent = providerNames[provider];
+                button.className = "game-button" + (provider === "google" ? " primary google-button" : "");
+                button.textContent = "Continue with " + providerNames[provider];
                 button.onclick = async () => {
                     setLoginStatus("Opening " + providerNames[provider] + "…");
                     button.disabled = true;

@@ -40,7 +40,7 @@ Without Supabase configured the game works exactly as before (local save only) a
 The anon key is meant to be public; Row Level Security in `schema.sql` restricts every player to their own row. **Never** put the `service_role` key in this project.
 
 ### Testing guest vs logged-in
-- Open the game to see the login screen. Choose **Log in**, **Create an account**, Google/Discord, or **Continue as Guest**.
+- Open the game to see the login screen. Choose **Continue with Google** to create or access an account, or use email/password, Discord, or **Continue as Guest**.
 - Guest mode uses a local UUID in `localStorage.miloGuestId`; when configured, pressing **Continue as Guest** also creates a Supabase anonymous user for cloud saves.
 - From Home → 👤 chip, choose **Log in with email** or **Save progress with Google** to back up a guest save.
 - Open the site in a private window, sign in with the same account → the cloud save loads.
