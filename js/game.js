@@ -312,6 +312,7 @@ const levelNames = [
 
 const screenIds = [
     "loading-screen",
+    "login-screen",
     "home-screen",
     "heroes-screen",
     "settings-screen",
@@ -448,7 +449,8 @@ function startLoading() {
         setTimeout(() => {
             screen.classList.add("hidden");
             screen.style.display = "none";
-            showHome();
+            if (window.showInitialScreen) window.showInitialScreen();
+            else showHome();
         }, 200);
     };
 

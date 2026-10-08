@@ -38,6 +38,40 @@
       </div>
     </section>
 
+    <section id="login-screen" class="screen hidden menu-screen scroll-screen" aria-labelledby="login-title">
+      <div class="menu-card auth-card">
+        <div class="auth-mark" aria-hidden="true">🦋</div>
+        <div class="eyebrow">Hollow Milo</div>
+        <h1 id="login-title">Welcome back</h1>
+        <p id="login-copy" class="auth-copy">Sign in to keep your Geo, Vessels, and progress synced across devices.</p>
+
+        <form id="login-form" class="auth-form" novalidate>
+          <label class="auth-field">
+            <span>Email address</span>
+            <input id="login-email" type="email" name="email" autocomplete="email" placeholder="you@example.com" required>
+          </label>
+          <label class="auth-field">
+            <span>Password</span>
+            <input id="login-password" type="password" name="password" autocomplete="current-password" placeholder="At least 6 characters" minlength="6" required>
+          </label>
+          <button class="game-button primary" id="login-submit" type="submit">Log in</button>
+        </form>
+
+        <button class="auth-link" id="login-forgot" type="button">Forgot password?</button>
+        <p id="login-status" class="auth-status" role="status" aria-live="polite"></p>
+
+        <div class="auth-divider"><span>or continue with</span></div>
+        <div id="login-providers" class="auth-provider-grid"></div>
+
+        <div class="auth-switch">
+          <span id="login-switch-label">New to Hollow Milo?</span>
+          <button class="auth-link" id="login-switch" type="button">Create an account</button>
+        </div>
+        <button class="game-button auth-guest" id="login-guest" type="button">Continue as Guest</button>
+        <p class="auth-note">Guest progress is saved on this device. Sign in later to back it up to the cloud.</p>
+      </div>
+    </section>
+
     <section id="home-screen" class="screen hidden menu-screen">
       <div class="menu-card hero-panel">
         <div class="eyebrow">A forgotten kingdom awaits</div>
@@ -55,6 +89,7 @@
           <button class="game-button primary" type="button" onclick="openMetro()">🕳 Descend</button>
           <button class="game-button wish" type="button" onclick="openGacha()">🕯 Wish</button>
           <button class="game-button" type="button" onclick="openHeroes()">🕯 Vessels</button>
+          <button class="game-button" id="home-auth-button" type="button" onclick="openLogin()">👤 Log in</button>
           <button class="game-button" type="button" onclick="openSettings()">⚙ Settings</button>
         </div>
 

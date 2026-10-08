@@ -1,6 +1,6 @@
 /* Offline cache. Static files only: stale-while-revalidate, so repeat visits load instantly
    and updates arrive on the next reload. Bump VERSION on each deploy to purge old files. */
-const VERSION = "hollow-milo-v4";
+const VERSION = "hollow-milo-v5";
 const CORE = ["./", "index.html", "style.css", "config.js", "js/game.js", "js/scenery.js", "js/gachaAnimation.js",
               "js/gacha.js", "js/auth.js", "js/saveSystem.js", "js/ui.js", "js/metroid.js",
               "fonts/cinzel-latin-500-normal.woff2", "fonts/cinzel-latin-700-normal.woff2"];
