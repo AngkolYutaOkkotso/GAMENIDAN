@@ -6,6 +6,7 @@
 (function () {
     const app = document.getElementById("app");
     let bannerId = Gacha.BANNERS[0].id, busy = false;
+    let loginMode = "login", appReady = false;
 
     /* ---------- build DOM ---------- */
     app.insertAdjacentHTML("beforeend", `
@@ -42,6 +43,162 @@
       <div id="toast" class="toast hidden"></div>`);
 
     const $q = id => document.getElementById(id);
+    const providerNames = { google: "Google", discord: "Discord" };
+
+    /* ---------- login screen ---------- */
+    function setLoginStatus(message, kind = "") {
+        const el = $q("login-status");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "auth-status" + (kind ? " " + kind : "");
+    }
+
+    function renderLogin() {
+        const signup = loginMode === "signup";
+        const title = $q("login-title");
+        const copy = $q("login-copy");
+        const submit = $q("login-submit");
+        const password = $q("login-password");
+        const forgot = $q("login-forgot");
+        const switchLabel = $q("login-switch-label");
+        const switchButton = $q("login-switch");
+        if (!title) return;
+
+        title.textContent = signup ? "Create your account" : "Sign in to Hollow Milo";
+        copy.textContent = signup
+            ? "Create an account with your email to keep your Geo, Vessels, and progress synced across devices."
+            : "Continue with Google to create a new account or access your existing progress.";
+        submit.textContent = signup ? "Create account" : "Log in";
+        password.autocomplete = signup ? "new-password" : "current-password";
+        forgot.classList.toggle("hidden", signup);
+        switchLabel.textContent = signup ? "Already have an account?" : "New to Hollow Milo?";
+        switchButton.textContent = signup ? "Log in" : "Create an account";
+
+        const providers = $q("login-providers");
+        providers.innerHTML = "";
+        if (!Auth.initialized) {
+            providers.innerHTML = '<p class="auth-note">Connecting to account services…</p>';
+        } else if (!Auth.configured()) {
+            providers.innerHTML = '<p class="auth-note">Cloud sign-in is not configured. You can still play as a guest.</p>';
+        } else {
+            const available = ((window.MILO_CONFIG || {}).PROVIDERS || [])
+                .filter(provider => providerNames[provider])
+                .sort((a, b) => (a === "google" ? -1 : b === "google" ? 1 : 0));
+            available.forEach(provider => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "game-button" + (provider === "google" ? " primary google-button" : "");
+                button.textContent = "Continue with " + providerNames[provider];
+                button.onclick = async () => {
+                    setLoginStatus("Opening " + providerNames[provider] + "…");
+                    button.disabled = true;
+                    let result;
+                    try { result = await Auth.signInWithProvider(provider); }
+                    catch (error) { result = { error: error.message || "Provider sign-in failed. Please try again." }; }
+                    if (result.error) {
+                        setLoginStatus(result.error, "error");
+                        button.disabled = false;
+                    }
+                };
+                providers.appendChild(button);
+            });
+        }
+    }
+
+    function openLogin(mode = "login") {
+        loginMode = mode === "signup" ? "signup" : "login";
+        if (window.stopGame) stopGame();
+        if (window.hideScreens) hideScreens();
+        $q("login-screen").classList.remove("hidden");
+        setLoginStatus("");
+        renderLogin();
+        setTimeout(() => $q("login-email").focus(), 0);
+    }
+    window.openLogin = openLogin;
+
+    window.showInitialScreen = function () {
+        appReady = true;
+        if (Auth.initialized && Auth.user) showHome();
+        else openLogin();
+    };
+
+    $q("login-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        const email = $q("login-email").value.trim();
+        const password = $q("login-password").value;
+        if (!email || !email.includes("@")) {
+            setLoginStatus("Enter a valid email address.", "error");
+            $q("login-email").focus();
+            return;
+        }
+        if (password.length < 6) {
+            setLoginStatus("Your password must be at least 6 characters.", "error");
+            $q("login-password").focus();
+            return;
+        }
+
+        if (!Auth.initialized) {
+            setLoginStatus("Account services are still loading. Try again in a moment.", "error");
+            return;
+        }
+        const button = $q("login-submit");
+        button.disabled = true;
+        setLoginStatus(loginMode === "signup" ? "Creating your account…" : "Signing in…");
+        let result;
+        try {
+            result = loginMode === "signup"
+                ? await Auth.signUpWithPassword(email, password)
+                : await Auth.signInWithPassword(email, password);
+        } catch (error) {
+            result = { error: error.message || "Account request failed. Please try again." };
+        }
+        button.disabled = false;
+
+        if (result.error) {
+            setLoginStatus(result.error, "error");
+        } else if (result.needsConfirmation) {
+            setLoginStatus("Account created. Check your email to confirm it, then log in.", "success");
+            loginMode = "login";
+            renderLogin();
+        } else {
+            setLoginStatus("Signed in. Loading your save…", "success");
+            showHome();
+        }
+    });
+
+    $q("login-switch").onclick = () => {
+        loginMode = loginMode === "login" ? "signup" : "login";
+        setLoginStatus("");
+        renderLogin();
+    };
+    $q("login-forgot").onclick = async () => {
+        const email = $q("login-email").value.trim();
+        if (!email || !email.includes("@")) {
+            setLoginStatus("Enter your email address first, then try again.", "error");
+            $q("login-email").focus();
+            return;
+        }
+        setLoginStatus("Sending password reset email…");
+        let result;
+        try { result = await Auth.resetPassword(email); }
+        catch (error) { result = { error: error.message || "Password reset failed. Please try again." }; }
+        setLoginStatus(result.error || "Password reset email sent. Check your inbox.", result.error ? "error" : "success");
+    };
+    $q("login-guest").onclick = async () => {
+        if (!Auth.initialized) {
+            setLoginStatus("Account services are still loading. Try again in a moment.", "error");
+            return;
+        }
+        const button = $q("login-guest");
+        button.disabled = true;
+        setLoginStatus("Preparing your guest save…");
+        let result;
+        try { result = await Auth.continueAsGuest(); }
+        catch (error) { result = { error: error.message || "Guest sign-in failed. Please try again." }; }
+        button.disabled = false;
+        if (result.error) setLoginStatus(result.error, "error");
+        else { showHome(); toast("Playing as a guest. You can log in any time."); }
+    };
 
     function toast(msg) {
         const t = $q("toast"); t.textContent = msg; t.classList.remove("hidden");
@@ -114,8 +271,14 @@
         if (!Auth.configured()) return;
         const names = { google: "Google", discord: "Discord" };
         if (p.method === "guest") {
+            const email = document.createElement("button");
+            email.className = "game-button primary";
+            email.textContent = "Log in with email";
+            email.onclick = () => { $q("account-modal").classList.add("hidden"); openLogin("login"); };
+            box.appendChild(email);
+
             ((window.MILO_CONFIG || {}).PROVIDERS || []).forEach(prov => {
-                const b = document.createElement("button"); b.className = "game-button primary";
+                const b = document.createElement("button"); b.className = "game-button";
                 b.textContent = "Save progress with " + names[prov];
                 b.onclick = async () => { const r = await Auth.signInWithProvider(prov); if (r.error) toast(r.error); };
                 box.appendChild(b);
@@ -129,10 +292,25 @@
 
     window.openAccount = () => { $q("account-modal").classList.remove("hidden"); renderAccount(); };
     $q("account-close").onclick = () => $q("account-modal").classList.add("hidden");
-    Auth.onChange(() => { renderAccount(); updateChip(); });
+    Auth.onChange(() => {
+        renderAccount();
+        updateChip();
+        renderLogin();
+        if (appReady && Auth.initialized && Auth.user) showHome();
+    });
     SaveSystem.onStatus(() => { renderAccount(); });
 
-    function updateChip() { const c = document.getElementById("account-chip"); if (c) c.textContent = "👤 " + Auth.profile().name; }
+    function updateChip() {
+        const profile = Auth.profile();
+        const c = document.getElementById("account-chip");
+        if (c) c.textContent = "👤 " + profile.name;
+        const authButton = document.getElementById("home-auth-button");
+        if (authButton) {
+            const signedIn = profile.method !== "guest";
+            authButton.textContent = signedIn ? "👤 Account" : "👤 Log in";
+            authButton.onclick = signedIn ? openAccount : () => openLogin("login");
+        }
+    }
     updateChip();
 
     /* cloud + offline cache start AFTER the game is on screen, never blocking it */

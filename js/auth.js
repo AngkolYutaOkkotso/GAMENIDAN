@@ -1,14 +1,15 @@
 /* =========================================================
    auth.js - accounts via Supabase Auth
-   * Guest  : Supabase *anonymous* sign-in (+ a UUID in localStorage as
-             a display id / offline fallback).
+   * Guest  : Supabase *anonymous* sign-in is opt-in from the login screen
+             (+ a UUID in localStorage as a display id / offline fallback).
+   * Email  : email/password login, account creation and password reset.
    * OAuth  : Google / Discord. A guest is UPGRADED with linkIdentity(),
              which keeps the same user id, so the guest's cloud save
              automatically belongs to the new account.
    * If Supabase is not configured the game simply runs local-only.
 ========================================================= */
 const Auth = (() => {
-    let client = null, user = null;
+    let client = null, user = null, initialized = false;
     const listeners = [];
 
     const cfg = () => window.MILO_CONFIG || {};
@@ -58,29 +59,84 @@ const Auth = (() => {
 
     async function init() {
         guestId();
-        if (!hasKeys()) { emit(); return; }
+        if (!hasKeys()) { initialized = true; emit(); return; }
         try {
             await withTimeout(loadLibrary(), 10000);
             client = window.supabase.createClient(cfg().SUPABASE_URL, cfg().SUPABASE_ANON_KEY);
             const { data } = await withTimeout(client.auth.getSession());
             user = data.session ? data.session.user : null;
-            if (!user && cfg().ALLOW_GUEST_CLOUD !== false) {
-                const res = await withTimeout(client.auth.signInAnonymously());   // needs "Anonymous sign-ins" enabled
-                if (res.error) console.warn("Anonymous sign-in failed:", res.error.message);
-                else user = res.data.user;
-            }
         } catch (e) {
             console.warn("Cloud saves unavailable, playing local-only:", e.message);
-            client = null; user = null; emit(); return;
+            client = null; user = null;
         }
-        client.auth.onAuthStateChange((event, session) => {
-            const newUser = session ? session.user : null;
-            const changed = (newUser && newUser.id) !== (user && user.id) || event === "USER_UPDATED";
-            user = newUser;
-            if (changed) { emit(); if (user) SaveSystem.sync(); }
-        });
+
+        if (client) {
+            client.auth.onAuthStateChange((event, session) => {
+                const newUser = session ? session.user : null;
+                const changed = (newUser && newUser.id) !== (user && user.id) || event === "USER_UPDATED";
+                user = newUser;
+                if (changed) { emit(); if (user) SaveSystem.sync(); }
+            });
+        }
+        initialized = true;
         emit();
         if (user) await SaveSystem.sync();
+    }
+
+    /* Anonymous auth is opt-in now: the first screen lets a player choose
+       between signing in and playing as a guest. */
+    async function continueAsGuest() {
+        if (!client || cfg().ALLOW_GUEST_CLOUD === false) { emit(); return { }; }
+        if (user && user.is_anonymous) { emit(); return { }; }
+        try {
+            const res = await withTimeout(client.auth.signInAnonymously());
+            if (res.error) return { error: res.error.message };
+            user = res.data.user;
+            emit();
+            await SaveSystem.sync();
+            return { };
+        } catch (e) {
+            return { error: "Guest sign-in failed: " + e.message };
+        }
+    }
+
+    async function prepareAccountSwitch() {
+        if (user && user.is_anonymous && window.SaveSystem) await SaveSystem.pushNow();
+    }
+
+    async function signInWithPassword(email, password) {
+        if (!client) return { error: "Cloud accounts are not configured. Continue as a guest or check config.js." };
+        await prepareAccountSwitch();
+        const { data, error } = await withTimeout(client.auth.signInWithPassword({ email, password }));
+        if (error) return { error: error.message };
+        user = data.user;
+        emit();
+        await SaveSystem.sync();
+        return { };
+    }
+
+    async function signUpWithPassword(email, password) {
+        if (!client) return { error: "Cloud accounts are not configured. Continue as a guest or check config.js." };
+        await prepareAccountSwitch();
+        const { data, error } = await withTimeout(client.auth.signUp({
+            email,
+            password,
+            options: { emailRedirectTo: location.origin + location.pathname }
+        }));
+        if (error) return { error: error.message };
+        if (!data.session) return { needsConfirmation: true };
+        user = data.user;
+        emit();
+        await SaveSystem.sync();
+        return { };
+    }
+
+    async function resetPassword(email) {
+        if (!client) return { error: "Cloud accounts are not configured. Check config.js." };
+        const { error } = await withTimeout(client.auth.resetPasswordForEmail(email, {
+            redirectTo: location.origin + location.pathname
+        }));
+        return error ? { error: error.message } : { };
     }
 
     async function signInWithProvider(provider) {
@@ -106,7 +162,13 @@ const Auth = (() => {
         emit();
     }
 
-    return { init, onChange, profile, signInWithProvider, signOut,
-             get client() { return client; }, get user() { return user; }, configured };
+    return {
+        init, onChange, profile, signInWithProvider, signInWithPassword,
+        signUpWithPassword, resetPassword, continueAsGuest, signOut,
+        get client() { return client; },
+        get user() { return user; },
+        get initialized() { return initialized; },
+        configured
+    };
 })();
 window.Auth = Auth;

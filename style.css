@@ -218,6 +218,60 @@ details{margin-top:14px;text-align:left}summary{cursor:pointer;color:var(--accen
 @media(max-width:480px){.menu-actions.two{grid-template-columns:1fr}.wish-card{width:44%}}
 
 /* =========================================================
+   ACCOUNT LOGIN SCREEN
+========================================================= */
+.auth-card{
+  width:min(500px,100%);
+  max-height:calc(100vh - 32px);
+  overflow:auto;
+  text-align:center;
+}
+.auth-mark{font-size:42px;line-height:1;margin-bottom:12px;filter:drop-shadow(0 5px 10px rgba(0,0,0,.35))}
+.auth-copy{max-width:390px;margin:12px auto 22px;color:var(--muted);line-height:1.55}
+.auth-form{display:grid;gap:13px;text-align:left}
+.auth-field{display:grid;gap:7px;color:var(--muted);font-size:.85rem;font-weight:800}
+.auth-field input{
+  width:100%;
+  border:1px solid var(--line);
+  border-radius:4px;
+  padding:13px 14px;
+  background:#080d17;
+  color:var(--text);
+  font:inherit;
+  outline:none;
+}
+.auth-field input:focus{border-color:#a9bad0;box-shadow:0 0 0 3px rgba(169,186,208,.16)}
+.auth-field input::placeholder{color:#5f6d81}
+.auth-form .game-button{width:100%;margin-top:4px}
+.auth-link{
+  border:0;
+  padding:4px 0;
+  color:#cbd8e8;
+  background:none;
+  cursor:pointer;
+  font-weight:800;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.auth-link:hover{color:#fff}
+#login-forgot{margin-top:12px;font-size:.82rem;font-weight:600}
+.auth-status{min-height:1.35em;margin:12px 0 0;color:#d6dfeb;line-height:1.45}
+.auth-status.error{color:#ffaaa5}
+.auth-status.success{color:#a9e0c0}
+.auth-divider{display:flex;align-items:center;gap:12px;margin:20px 0 14px;color:#738197;font-size:.78rem;text-transform:uppercase;letter-spacing:.12em}
+.auth-divider::before,.auth-divider::after{content:"";height:1px;flex:1;background:var(--line)}
+.auth-provider-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.auth-provider-grid:empty{display:none}
+.auth-provider-grid .game-button{padding:11px 10px}
+.auth-switch{display:flex;justify-content:center;align-items:center;gap:7px;flex-wrap:wrap;margin:22px 0 14px;color:var(--muted);font-size:.9rem}
+.auth-guest{width:100%;background:transparent}
+.auth-note{margin:14px 0 0;color:#718096;font-size:.78rem;line-height:1.45}
+@media(max-width:420px){
+  .auth-card{max-height:calc(100vh - 20px);padding:20px}
+  .auth-provider-grid{grid-template-columns:1fr}
+}
+
+/* =========================================================
    HOLLOW THEME - ink, bone and pale soul-light (overrides above)
 ========================================================= */
 :root{

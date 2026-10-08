@@ -10,7 +10,7 @@ vercel.json       long cache headers for fonts/vendor
 fonts/ vendor/    self-hosted Cinzel font + Supabase library (no third-party requests)
 style.css         UI + wish animation styles
 js/game.js        original game (small hooks added, see "What changed")
-js/auth.js        guest / Google / Discord login, guest -> OAuth upgrade
+js/auth.js        login / sign-up (email + password), guest / Google / Discord auth
 js/saveSystem.js  serialize, debounced auto-save, cloud sync
 js/gacha.js       banners, rarity pools, pity, history
 js/gachaAnimation.js  cinematic wish canvas animation
@@ -40,9 +40,10 @@ Without Supabase configured the game works exactly as before (local save only) a
 The anon key is meant to be public; Row Level Security in `schema.sql` restricts every player to their own row. **Never** put the `service_role` key in this project.
 
 ### Testing guest vs logged-in
-- Open the game → Home → 👤 chip. You start as `Guest-xxxx` (local UUID in `localStorage.miloGuestId`, plus a Supabase anonymous user when configured).
-- Play a level / wish, then press "Save progress with Google": the guest is *linked* to Google, keeping the same user id and save.
-- Open the site in a private window, sign in with the same Google account → the cloud save loads.
+- Open the game to see the login screen. Choose **Continue with Google** to create or access an account, or use email/password, Discord, or **Continue as Guest**.
+- Guest mode uses a local UUID in `localStorage.miloGuestId`; when configured, pressing **Continue as Guest** also creates a Supabase anonymous user for cloud saves.
+- From Home → 👤 chip, choose **Log in with email** or **Save progress with Google** to back up a guest save.
+- Open the site in a private window, sign in with the same account → the cloud save loads.
 - If a device has local progress and logs into a different account that already has a cloud save, you are asked which to keep.
 
 ## How saving works
