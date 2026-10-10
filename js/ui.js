@@ -64,11 +64,18 @@
         const switchButton = $q("login-switch");
         if (!title) return;
 
-        title.textContent = signup ? "Create your account" : "Sign in to Hollow Milo";
+        title.textContent = signup ? "Awaken a new vessel" : "Welcome back, vessel";
         copy.textContent = signup
-            ? "Create an account with your email to keep your Geo, Vessels, and progress synced across devices."
-            : "Continue with Google to create a new account or access your existing progress.";
-        submit.textContent = signup ? "Create account" : "Log in";
+            ? "Create an account to keep your Geo, Vessels and progress safe across every device."
+            : "Sign in to pick up where your light went out. New here? Google creates an account for you.";
+        submit.innerHTML = "<span>" + (signup ? "Create account" : "Log in") + "</span>";
+        const panel = title.closest(".threshold-panel");
+        if (panel) panel.classList.toggle("signup", signup);
+        document.querySelectorAll(".auth-tab").forEach(tab => {
+            const active = tab.dataset.mode === loginMode;
+            tab.classList.toggle("active", active);
+            tab.setAttribute("aria-selected", active ? "true" : "false");
+        });
         password.autocomplete = signup ? "new-password" : "current-password";
         forgot.classList.toggle("hidden", signup);
         switchLabel.textContent = signup ? "Already have an account?" : "New to Hollow Milo?";
@@ -87,8 +94,10 @@
             available.forEach(provider => {
                 const button = document.createElement("button");
                 button.type = "button";
-                button.className = "game-button" + (provider === "google" ? " primary google-button" : "");
-                button.textContent = "Continue with " + providerNames[provider];
+                button.className = "game-button" + (provider === "google" ? " google-button" : "");
+                button.innerHTML = (provider === "google"
+                    ? '<svg class="provider-mark" aria-hidden="true"><use href="#google-mark"/></svg>' : "")
+                    + "<span>Continue with " + providerNames[provider] + "</span>";
                 button.onclick = async () => {
                     setLoginStatus("Opening " + providerNames[provider] + "…");
                     button.disabled = true;
@@ -166,6 +175,23 @@
         }
     });
 
+    document.querySelectorAll(".auth-tab").forEach(tab => {
+        tab.onclick = () => {
+            if (tab.dataset.mode === loginMode) return;
+            loginMode = tab.dataset.mode;
+            setLoginStatus("");
+            renderLogin();
+        };
+    });
+    const reveal = $q("login-reveal");
+    if (reveal) reveal.onclick = () => {
+        const input = $q("login-password");
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        reveal.setAttribute("aria-pressed", show ? "true" : "false");
+        reveal.setAttribute("aria-label", show ? "Hide password" : "Show password");
+        input.focus();
+    };
     $q("login-switch").onclick = () => {
         loginMode = loginMode === "login" ? "signup" : "login";
         setLoginStatus("");

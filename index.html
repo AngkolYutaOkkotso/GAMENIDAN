@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="style.css">
   <!-- Supabase is NOT loaded here: auth.js lazy-loads vendor/supabase.js after the game is up. -->
   <script src="config.js" defer></script>
+  <script src="js/threshold.js" defer></script>
   <!-- deferred scripts run in this order; game.js goes last -->
   <script src="js/scenery.js" defer></script>
   <script src="js/gachaAnimation.js" defer></script>
@@ -27,49 +28,185 @@
   </noscript>
 
   <main id="app">
-    <section id="loading-screen" class="screen loading-screen">
-      <div class="loading-card">
-        <div class="brand-mark" aria-hidden="true">🦋</div>
-        <h1>Hollow Milo</h1>
-        <p>Descending into the deep…</p>
-        <div class="loading-track" aria-label="Loading">
-          <div id="loading-progress" class="loading-progress"></div>
+    <!-- Shared SVG symbols for the loading + login screens (Milo's silhouette, the Google mark). -->
+    <svg class="svg-defs" aria-hidden="true" focusable="false">
+      <defs>
+        <radialGradient id="soul-core" cx="50%" cy="50%" r="50%">
+          <stop offset="0" stop-color="#ffffff" stop-opacity=".95"/>
+          <stop offset=".35" stop-color="#cfe2ff" stop-opacity=".55"/>
+          <stop offset="1" stop-color="#6f8fbf" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="moon-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0" stop-color="#f4f8ff" stop-opacity=".95"/>
+          <stop offset=".22" stop-color="#d9e6fa" stop-opacity=".7"/>
+          <stop offset=".5" stop-color="#7f9cc8" stop-opacity=".22"/>
+          <stop offset="1" stop-color="#3a4f74" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="thread-grad" x1="0" x2="1">
+          <stop offset="0" stop-color="#6f86a8"/>
+          <stop offset=".7" stop-color="#d9e4f3"/>
+          <stop offset="1" stop-color="#ffffff"/>
+        </linearGradient>
+        <symbol id="milo-glyph" viewBox="0 0 64 72">
+          <path class="mg-cloak" d="M19 44 Q15 58 10 70 L54 70 Q49 58 45 44 Z"/>
+          <rect class="mg-face" x="18" y="27" width="28" height="19" rx="8"/>
+          <ellipse class="mg-eye" cx="26" cy="36" rx="2.6" ry="4"/>
+          <ellipse class="mg-eye" cx="38" cy="36" rx="2.6" ry="4"/>
+          <path class="mg-cap" d="M3 31 C3 13 18 3 32 3 C46 3 61 13 61 31 Q32 25 3 31 Z"/>
+          <circle class="mg-spot" cx="22" cy="14" r="3.6"/>
+          <circle class="mg-spot" cx="40" cy="11" r="2.6"/>
+          <circle class="mg-spot" cx="49" cy="21" r="2.2"/>
+        </symbol>
+        <symbol id="google-mark" viewBox="0 0 48 48">
+          <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
+          <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+          <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+          <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/>
+        </symbol>
+      </defs>
+    </svg>
+
+    <section id="loading-screen" class="screen loading-screen" aria-label="Loading Hollow Milo">
+      <canvas class="veil-canvas" data-veil="loading" aria-hidden="true"></canvas>
+      <div class="loading-vignette" aria-hidden="true"></div>
+
+      <div class="loading-stage">
+        <div class="sigil" aria-hidden="true">
+          <svg viewBox="0 0 220 220" class="sigil-svg">
+            <defs>
+              <path id="sigil-text-path" d="M110 110 m-96 0 a96 96 0 1 1 192 0 a96 96 0 1 1 -192 0"/>
+            </defs>
+            <g class="sigil-runes">
+              <text><textPath href="#sigil-text-path" textLength="595">✦ THE DEEP REMEMBERS ✦ EVERY VESSEL RETURNS ✦ CARRY THE LIGHT ✦</textPath></text>
+            </g>
+            <circle class="sigil-ticks" cx="110" cy="110" r="84"/>
+            <circle class="sigil-ring" cx="110" cy="110" r="76"/>
+            <circle class="sigil-track" cx="110" cy="110" r="66"/>
+            <circle id="loading-ring" class="sigil-progress" cx="110" cy="110" r="66"/>
+            <g class="sigil-points">
+              <path d="M110 22 l5 10 -5 10 -5 -10z"/><path d="M110 178 l5 10 -5 10 -5 -10z"/>
+              <path d="M22 110 l10 5 10 -5 -10 -5z"/><path d="M178 110 l10 5 10 -5 -10 -5z"/>
+            </g>
+            <circle class="sigil-core" cx="110" cy="110" r="54" fill="url(#soul-core)"/>
+          </svg>
+          <svg class="sigil-milo" viewBox="0 0 64 72"><use href="#milo-glyph"/></svg>
         </div>
-        <strong id="loading-percent">0%</strong>
+
+        <h1 class="loading-title" aria-label="Hollow Milo">
+          <span style="--i:0">H</span><span style="--i:1">O</span><span style="--i:2">L</span><span style="--i:3">L</span><span style="--i:4">O</span><span style="--i:5">W</span>
+          <span class="gap"></span>
+          <span style="--i:7">M</span><span style="--i:8">I</span><span style="--i:9">L</span><span style="--i:10">O</span>
+        </h1>
+        <p id="loading-lore" class="loading-lore">Kindling the lantern…</p>
+
+        <div class="thread" aria-hidden="true">
+          <span class="thread-cap left"></span>
+          <div class="loading-track" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100">
+            <div id="loading-progress" class="loading-progress"><i class="thread-ember"></i></div>
+          </div>
+          <span class="thread-cap right"></span>
+        </div>
+        <strong id="loading-percent" class="loading-percent">0%</strong>
       </div>
+
+      <div class="loading-footer" aria-hidden="true">— Descending into the deep —</div>
     </section>
 
-    <section id="login-screen" class="screen hidden menu-screen scroll-screen" aria-labelledby="login-title">
-      <div class="menu-card auth-card">
-        <div class="auth-mark" aria-hidden="true">🦋</div>
-        <div class="eyebrow">Hollow Milo</div>
-        <h1 id="login-title">Sign in to Hollow Milo</h1>
-        <p id="login-copy" class="auth-copy">Continue with Google to create a new account or access your existing progress.</p>
+    <section id="login-screen" class="screen hidden threshold-screen" aria-labelledby="login-title">
+      <canvas class="veil-canvas" data-veil="login" aria-hidden="true"></canvas>
+      <div class="threshold-fog fog-a" aria-hidden="true"></div>
+      <div class="threshold-fog fog-b" aria-hidden="true"></div>
 
-        <div id="login-providers" class="auth-provider-grid"></div>
-        <div class="auth-divider"><span>or use email</span></div>
+      <div class="threshold-shell">
+        <!-- Left: the gate. A living illustration of Milo at the edge of the kingdom. -->
+        <aside class="threshold-art" aria-hidden="true">
+          <svg class="threshold-scene" viewBox="0 0 600 800" preserveAspectRatio="xMidYMax slice">
+            <circle class="scene-moon-halo" cx="300" cy="250" r="250" fill="url(#moon-glow)"/>
+            <circle class="scene-moon" cx="300" cy="250" r="92"/>
+            <g class="scene-moon-shade"><circle cx="270" cy="226" r="18"/><circle cx="328" cy="272" r="11"/><circle cx="318" cy="214" r="7"/><circle cx="262" cy="284" r="6"/></g>
+            <circle class="scene-ring r1" cx="300" cy="250" r="128"/>
+            <circle class="scene-ring r2" cx="300" cy="250" r="164"/>
+            <path class="scene-far" d="M0 800 L0 600 L8 600 L8 401 L13 401 L20 348 L28 401 L33 401 L33 600 L56 600 L56 524 L63 524 L72 485 L82 524 L89 524 L89 600 L110 600 L110 474 L117 474 L126 421 L136 474 L143 474 L143 518 L149 518 L153 500 L157 518 L163 518 L163 600 L184 600 L184 420 L192 420 L204 319 L216 420 L224 420 L224 600 L235 600 L235 502 L241 502 L250 426 L259 502 L265 502 L265 536 L271 536 L275 518 L279 536 L285 536 L285 600 L312 600 L312 441 L319 441 L329 401 L339 441 L346 441 L346 600 L374 600 L374 500 L378 500 L384 458 L390 500 L394 500 L394 535 L400 535 L404 517 L408 535 L414 535 L414 600 L433 600 L433 472 L437 472 L442 432 L447 472 L451 472 L451 600 L467 600 L467 431 L473 431 L482 359 L491 431 L497 431 L497 490 L503 490 L507 472 L511 490 L517 490 L517 600 L524 600 L524 447 L528 447 L535 419 L542 447 L546 447 L546 501 L552 501 L556 483 L560 501 L566 501 L566 600 L591 600 L591 474 L596 474 L603 419 L610 474 L615 474 L615 800 Z"/>
+            <g class="scene-windows">
+              <rect x="200" y="440" width="4" height="9"/><rect x="326" y="460" width="4" height="8"/><rect x="480" y="450" width="4" height="9"/><rect x="120" y="500" width="3" height="7"/><rect x="537" y="470" width="3" height="7"/>
+            </g>
+            <path class="scene-near" d="M0 800 L0 690 L28 690 L28 579 L38 579 L54 458 L70 579 L80 579 L80 618 L86 618 L90 600 L94 618 L100 618 L100 690 L129 690 L129 627 L136 627 L147 552 L158 627 L165 627 L165 649 L171 649 L175 631 L179 649 L185 649 L185 690 L417 690 L417 594 L426 594 L439 489 L452 594 L461 594 L461 628 L467 628 L471 610 L475 628 L481 628 L481 690 L494 690 L494 569 L502 569 L513 493 L524 569 L532 569 L532 611 L538 611 L542 593 L546 611 L552 611 L552 690 L576 690 L576 592 L582 592 L590 541 L599 592 L605 592 L615 800 Z"/>
+            <!-- the ledge Milo stands on -->
+            <path class="scene-ledge" d="M0 800 L0 606 Q90 598 170 576 Q240 557 300 556 Q362 557 430 576 Q510 598 600 606 L600 800 Z"/>
+            <path class="scene-rim" d="M60 600 Q120 592 170 576 Q240 557 300 556 Q362 557 430 576 Q480 590 540 600"/>
+            <g class="scene-chains">
+              <path d="M70 0 V150"/><path d="M96 0 V96"/><path d="M520 0 V180"/><path d="M548 0 V120"/>
+            </g>
+            <g class="scene-hero">
+              <ellipse class="scene-shadow" cx="300" cy="557" rx="38" ry="5"/>
+              <use href="#milo-glyph" x="268" y="486" width="64" height="72"/>
+              <g class="scene-lantern">
+                <path class="lantern-staff" d="M326 540 L352 474"/>
+                <circle class="lantern-glow" cx="356" cy="482" r="30"/>
+                <path class="lantern-chain" d="M356 470 V476"/>
+                <path class="lantern-body" d="M350 476 h12 l-2 15 h-8z"/>
+              </g>
+            </g>
+          </svg>
 
-        <form id="login-form" class="auth-form" novalidate>
-          <label class="auth-field">
-            <span>Email address</span>
-            <input id="login-email" type="email" name="email" autocomplete="email" placeholder="you@example.com" required>
-          </label>
-          <label class="auth-field">
-            <span>Password</span>
-            <input id="login-password" type="password" name="password" autocomplete="current-password" placeholder="At least 6 characters" minlength="6" required>
-          </label>
-          <button class="game-button primary" id="login-submit" type="submit">Log in</button>
-        </form>
+          <div class="threshold-brand">
+            <span class="brand-eyebrow">The Threshold</span>
+            <strong class="brand-title">Hollow Milo</strong>
+            <p id="threshold-lore" class="brand-lore">“Every vessel begins at the gate. Few remember the way back.”</p>
+          </div>
+        </aside>
 
-        <button class="auth-link" id="login-forgot" type="button">Forgot password?</button>
-        <p id="login-status" class="auth-status" role="status" aria-live="polite"></p>
+        <!-- Right: the shrine tablet that holds the actual form. -->
+        <div class="threshold-panel">
+          <div class="panel-crown" aria-hidden="true"><span></span><i></i><span></span></div>
 
-        <div class="auth-switch">
-          <span id="login-switch-label">New to Hollow Milo?</span>
-          <button class="auth-link" id="login-switch" type="button">Create an account</button>
+          <div class="auth-tabs" role="tablist" aria-label="Account">
+            <button class="auth-tab active" id="login-tab-login" type="button" role="tab" aria-selected="true" data-mode="login">Log in</button>
+            <button class="auth-tab" id="login-tab-signup" type="button" role="tab" aria-selected="false" data-mode="signup">Create account</button>
+            <span class="auth-tab-ink" aria-hidden="true"></span>
+          </div>
+
+          <h1 id="login-title" class="panel-title">Welcome back, vessel</h1>
+          <p id="login-copy" class="auth-copy">Continue with Google to create a new account or access your existing progress.</p>
+
+          <div id="login-providers" class="auth-provider-grid"></div>
+          <div class="auth-divider"><span>or by email</span></div>
+
+          <form id="login-form" class="auth-form" novalidate>
+            <label class="auth-field">
+              <span class="field-label">Email address</span>
+              <span class="field-shell">
+                <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h18v11H3z M3.5 7l8.5 6.5L20.5 7"/></svg>
+                <input id="login-email" type="email" name="email" autocomplete="email" placeholder="you@example.com" required>
+              </span>
+            </label>
+            <label class="auth-field">
+              <span class="field-label">Password</span>
+              <span class="field-shell">
+                <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/></svg>
+                <input id="login-password" type="password" name="password" autocomplete="current-password" placeholder="At least 6 characters" minlength="6" required>
+                <button class="field-reveal" id="login-reveal" type="button" aria-label="Show password" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </span>
+            </label>
+            <button class="game-button primary auth-submit" id="login-submit" type="submit"><span>Log in</span></button>
+          </form>
+
+          <button class="auth-link" id="login-forgot" type="button">Forgot password?</button>
+          <p id="login-status" class="auth-status" role="status" aria-live="polite"></p>
+
+          <div class="auth-switch">
+            <span id="login-switch-label">New to Hollow Milo?</span>
+            <button class="auth-link" id="login-switch" type="button">Create an account</button>
+          </div>
+
+          <button class="auth-guest" id="login-guest" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v3 M9 5h6l1 3H8z M8 8h8v9a4 4 0 0 1-8 0z M12 11.5c1.2 1.3 1.2 3 0 4.2c-1.2-1.2-1.2-2.9 0-4.2z"/></svg>
+            <span><b>Wander as a Guest</b><small>Progress stays on this device</small></span>
+          </button>
+          <p class="auth-note">Sign in later to carry your guest save into the cloud.</p>
         </div>
-        <button class="game-button auth-guest" id="login-guest" type="button">Continue as Guest</button>
-        <p class="auth-note">Guest progress is saved on this device. Sign in later to back it up to the cloud.</p>
       </div>
     </section>
 
@@ -163,9 +300,9 @@
   <script>
     (function () {
       function stuck(msg) {
-        var p = document.querySelector("#loading-screen p");
+        var p = document.getElementById("loading-lore");
         if (!p || window.__miloBooted) return;
-        p.innerHTML = msg + ' <a href="#" style="color:#cfd8e3" onclick="(navigator.serviceWorker?navigator.serviceWorker.getRegistrations().then(function(r){return Promise.all(r.map(function(x){return x.unregister()}))}):Promise.resolve()).then(function(){location.reload()});return false">Reload</a>';
+        p.innerHTML = msg + ' <a href="#" style="color:#e8edf3;text-decoration:underline" onclick="(navigator.serviceWorker?navigator.serviceWorker.getRegistrations().then(function(r){return Promise.all(r.map(function(x){return x.unregister()}))}):Promise.resolve()).then(function(){location.reload()});return false">Reload</a>';
       }
       setTimeout(function () { stuck("Taking longer than expected…"); }, 6000);
       window.addEventListener("error", function (e) { stuck("Something went wrong (" + (e.message || "script error") + ")."); });

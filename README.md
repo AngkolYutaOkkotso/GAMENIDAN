@@ -20,6 +20,7 @@ js/metroFx.js     Descent feedback: screen shake, flashes, hit-stop, telegraph a
 docs/DESIGN.md    full design doc. Tags show what is built: [BUILT], [STAGE n] (scheduled), [PLANNED]
 tests/metro.test.js  automated simulation tests for the Descent (node tests/metro.test.js)
 js/scenery.js     particles, fog, lighting, procedural ambient audio
+js/threshold.js   loading + login screen atmosphere (soul motes, moths, parallax, lore lines)
 supabase/schema.sql   database table + security policies
 ```
 
