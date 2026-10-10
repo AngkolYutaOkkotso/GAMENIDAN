@@ -434,6 +434,15 @@ function openMap() {
 
 let loadingStarted = false;
 
+/* Lines of lore shown under the title while the bar fills (one per stage). */
+const LOADING_LORE = [
+    "Kindling the lantern…",
+    "Waking the old roads…",
+    "Gathering scattered Geo…",
+    "The vessel stirs…"
+];
+const LORE_STEP = 600;     // ms each line stays on screen
+
 function startLoading() {
     if (loadingStarted) return;
     loadingStarted = true;
@@ -441,37 +450,66 @@ function startLoading() {
     const screen = $("loading-screen");
     const bar = $("loading-progress");
     const percent = $("loading-percent");
+    const ring = $("loading-ring");
+    const lore = $("loading-lore");
+    const track = screen ? screen.querySelector(".loading-track") : null;
 
     if (!screen) { showHome(); return; }
 
     screen.classList.remove("hidden");
     screen.style.cssText = "display:flex;position:fixed;inset:0;z-index:9999";
 
-    const MIN = 450;      // shortest time the bar is shown
-    const MAX = 1500;     // never wait longer than this, whatever the network does
+    /* Long enough to actually see the sigil fill and the title rise, but still
+       capped so a slow network can never hold the player here. */
+    const MIN = 1900;     // shortest time the loading screen is shown
+    const MAX = 3200;     // never wait longer than this, whatever the network does
+    const RING = 414.69;  // circumference of the sigil's progress ring (r = 66)
     const t0 = performance.now();
-    let finished = false;
+    let finished = false, loreIndex = 0, loreTimer = 0;
+
+    /* One pending swap at a time, so fast progress can never leave the line faded out. */
+    const setLore = i => {
+        if (!lore || i === loreIndex) return;
+        loreIndex = i;
+        lore.classList.add("swap");
+        clearTimeout(loreTimer);
+        loreTimer = setTimeout(() => { lore.textContent = LOADING_LORE[loreIndex]; lore.classList.remove("swap"); }, 180);
+    };
 
     const setProgress = p => {
         p = Math.min(100, Math.round(p));
         if (bar) bar.style.width = p + "%";
         if (percent) percent.textContent = p + "%";
+        if (ring) ring.style.strokeDashoffset = (RING * (1 - p / 100)).toFixed(2);
+        if (track) track.setAttribute("aria-valuenow", p);
     };
 
-    const tick = setInterval(
-        () => setProgress(Math.min(90, (performance.now() - t0) / MIN * 90)), 50);
+    /* ease-out towards 92% while waiting, then snap to 100% on finish */
+    const tick = setInterval(() => {
+        const k = Math.min(1, (performance.now() - t0) / MIN);
+        setProgress(92 * (1 - Math.pow(1 - k, 2.2)));
+        setLore(Math.min(LOADING_LORE.length - 1, Math.floor((performance.now() - t0) / LORE_STEP)));
+    }, 50);
 
     const finish = () => {
         if (finished) return;
         finished = true;
         clearInterval(tick);
         setProgress(100);
+        screen.classList.add("done");
         setTimeout(() => {
-            screen.classList.add("hidden");
-            screen.style.display = "none";
+            screen.classList.add("leaving");
             if (window.showInitialScreen) window.showInitialScreen();
             else showHome();
-        }, 200);
+            /* showInitialScreen() hides every screen; keep the loader painted on top
+               while it fades out, then remove it for good. */
+            screen.classList.remove("hidden");
+            setTimeout(() => {
+                screen.classList.add("hidden");
+                screen.classList.remove("leaving");
+                screen.style.display = "none";
+            }, 760);
+        }, 380);
     };
 
     /* Real work: wait for the (self-hosted, tiny) fonts, but give up after 600 ms. */
