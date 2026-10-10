@@ -3,6 +3,7 @@
 const fs = require("fs"), vm = require("vm"), path = require("path");
 global.window = global; global.save = { coins: 0, selectedHero: "milo" }; global.saveGame = () => {};
 global.stopGame = () => {}; global.hideScreens = () => {};
+vm.runInThisContext(fs.readFileSync(path.join(__dirname, "../js/metroFx.js"), "utf8"));
 vm.runInThisContext(fs.readFileSync(path.join(__dirname, "../js/metroid.js"), "utf8"));
 const T = Metro._test, TS = T.TS;
 let pass = 0, fail = 0;
@@ -118,6 +119,58 @@ ok(shaft(false) === false, "r4: without wall jump the shaft is unreachable");
   ok(boss.dead && m.bossDead === true, "boss: can be defeated and progress is flagged");
   ok(seen.has("charge") && seen.has("slam") && seen.has("phase2"), "boss: uses charge + slam, enters phase 2 [" + [...seen].join(",") + "]");
   ok(T.R.g[19][39] === "." , "boss: door unlocks after victory");
+}
+
+/* ---- 7b. Descent options + feedback (Stage 1) ---- */
+{
+  const F = MetroFx;
+  const d = F.normalize({});
+  ok(d.fx.shake === 1 && d.fx.flash && d.fx.hitstop && d.fx.telegraph && !d.fx.fastDeath && d.audio.sfx === 100 && d.audio.ambient === 100, "options: defaults when settings are missing");
+  const bad = F.normalize({ fx: { shake: "huge", flash: 0, fastDeath: "yes" }, audio: { sfx: 999, ambient: -5 } });
+  ok(bad.fx.shake === 1 && bad.fx.flash === true && bad.fx.fastDeath === false && bad.audio.sfx === 100 && bad.audio.ambient === 0, "options: corrupt values fall back or clamp");
+  global.save = { coins: 0, selectedHero: "milo", settings: {} };
+  F.cycle("shake");
+  ok(F.get().fx.shake === 2 && save.settings.fx.shake === 2, "options: shake cycles Low -> Full and is written to the save");
+  F.cycle("shake"); F.cycle("shake");
+  ok(F.get().fx.shake === 1 && F.shakeScale() === .5, "options: shake cycles back around to Low (scale 0.5)");
+  F.cycle("shake"); F.cycle("shake"); ok(F.shakeScale() === 0, "options: shake Off removes all camera shake");
+  F.cycle("hitstop");
+  ok(F.freeze(6) === 0, "options: hit-stop off removes freeze frames");
+  F.cycle("hitstop");
+  ok(F.freeze(6) === 6, "options: hit-stop on keeps freeze frames");
+  F.cycle("flash");
+  ok(!F.flashOK(), "options: flashing off disables full-screen flashes");
+  F.cycle("sfx"); F.cycle("ambient");
+  ok(F.get().audio.sfx === 0 && F.get().audio.ambient === 0 && F.label("sfx") === "0%", "options: effects and ambient volume step down to 0%");
+  F.cycle("fastDeath");
+  ok(F.deadFrames() === 40, "options: reduced downtime shortens the death fade");
+  ok(F.optionsHTML().includes('data-fx="telegraph"'), "options: rows render with data-fx keys");
+  global.save = { coins: 0, selectedHero: "milo" };
+  let threw = false; try { F.play("hit"); F.play("nope"); } catch (e) { threw = true; }
+  ok(!threw, "sound: play() never throws (no AudioContext in Node)");
+  const src = fs.readFileSync(path.join(__dirname, "../js/metroid.js"), "utf8");
+  const used = [...src.matchAll(/MetroFx\.play\("([a-z]+)"\)/g)].map(m => m[1]);
+  const names = [...new Set(used)].filter(n => !F.SFX[n]);
+  ok(used.length > 10 && names.length === 0, "sound: every MetroFx.play() name exists in the sound table " + (names.join(",") || "(" + used.length + " calls)"));
+}
+
+/* ---- 7c. feedback options change real gameplay ---- */
+{
+  global.save = { coins: 0, selectedHero: "milo", settings: { fx: { hitstop: false, shake: 0, flash: true, telegraph: true, fastDeath: true }, audio: { sfx: 100, ambient: 100 } } };
+  T.init({}); T.load("r0", 100, 22 * TS - 31); T.S.enemies.length = 0; T.P.hp = 5;
+  T.S.enemies.push({ t: "crawler", x: T.P.x, y: T.P.y + 4, w: 26, h: 20, hp: 3, hpMax: 3, vx: 0, vy: 0, st: "idle", tm: 99, flash: 0, face: -1, home: { x: 0, y: 0 } });
+  T.step({});
+  ok(T.P.hp === 4 && T.S.hitstop === 0, "hit-stop off: taking damage does not freeze the game");
+  T.S.enemies.length = 0; T.P.invuln = 0; T.P.hp = 1; T.P.x = 100; T.P.vx = 0;
+  T.S.enemies.push({ t: "crawler", x: T.P.x, y: T.P.y + 4, w: 26, h: 20, hp: 3, hpMax: 3, vx: 0, vy: 0, st: "idle", tm: 99, flash: 0, face: -1, home: { x: 0, y: 0 } });
+  T.step({});
+  ok(T.S.dead === 1, "death: hp 0 starts the death sequence");
+  for (let i = 0; i < 45; i++) T.step({});
+  ok(T.S.dead === 0, "reduced downtime: respawn at the bench after 40 frames");
+  save.settings.fx.fastDeath = false; T.init({}); T.load("r0", 100, 22 * TS - 31); T.P.hp = 1; T.S.enemies.length = 0;
+  T.S.enemies.push({ t: "crawler", x: T.P.x, y: T.P.y + 4, w: 26, h: 20, hp: 3, hpMax: 3, vx: 0, vy: 0, st: "idle", tm: 99, flash: 0, face: -1, home: { x: 0, y: 0 } });
+  T.step({}); for (let i = 0; i < 45; i++) T.step({});
+  ok(T.S.dead === 1, "default downtime: still dead after 45 frames (80 frame fade)");
 }
 
 /* ---- 8. fuzz: random input in every room for NaN / exceptions ---- */

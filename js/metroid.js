@@ -187,8 +187,8 @@ const Metro = (() => {
         if (p.invuln > 0 || p.dashInv > 0 || S.dead || S.dialog) return;
         p.hp--; p.invuln = 70; p.healT = 0; p.dashT = 0;
         p.vx = (p.x + p.w / 2 < fromX ? -1 : 1) * 5.5; p.vy = -6; p.wallLock = 8;
-        S.hitstop = 6; S.shake = 9; burst(p.x + p.w / 2, p.y + p.h / 2, "#e8edf3", 10);
-        if (p.hp <= 0) { S.dead = 1; S.deadT = 0; }
+        S.hitstop = Math.max(S.hitstop, MetroFx.freeze(6)); S.shake = 9; S.hudPulse = 24; burst(p.x + p.w / 2, p.y + p.h / 2, "#e8edf3", 10);
+        if (p.hp <= 0) { S.dead = 1; S.deadT = 0; MetroFx.play("bigdeath"); } else MetroFx.play("hurt");
     }
 
     function stepPlayer() {
@@ -209,12 +209,12 @@ const Metro = (() => {
         /* heal: hold */
         if (K.heal && p.onGround && p.soul >= 33 && p.hp < m.hpMax && p.attackT <= 0 && p.dashT <= 0) {
             p.healT++; p.vx = 0;
-            if (p.healT >= 45) { p.hp++; p.soul -= 33; p.healT = 0; burst(p.x + 10, p.y + 8, "#cfe9ff", 14); }
+            if (p.healT >= 45) { p.hp++; p.soul -= 33; p.healT = 0; burst(p.x + 10, p.y + 8, "#cfe9ff", 14); MetroFx.play("heal"); }
         } else p.healT = 0;
 
         /* dash */
         if (K.dashP && ab.dash && p.dashCd <= 0 && p.dashT <= 0 && (p.onGround || p.airDash > 0) && !p.healT) {
-            p.dashT = DASH_T; p.dashDir = dir || p.face; p.face = p.dashDir; p.dashCd = hasCharm("swift") ? 24 : 42; p.dashInv = DASH_T + 2;
+            MetroFx.play("dash"); p.dashT = DASH_T; p.dashDir = dir || p.face; p.face = p.dashDir; p.dashCd = hasCharm("swift") ? 24 : 42; p.dashInv = DASH_T + 2;
             if (!p.onGround) p.airDash--; p.vy = 0; burst(p.x + 10, p.y + 15, "#9fb4cf", 8);
         }
 
@@ -228,9 +228,9 @@ const Metro = (() => {
             p.vy = Math.min(p.vy + G, MAXFALL);
             if (wallDir && dir === wallDir && p.vy > 0) p.vy = Math.min(p.vy, 2.2);          // wall slide
             if (p.jumpBuf > 0) {
-                if (p.coyote > 0) { p.vy = JUMP; p.coyote = 0; p.jumpBuf = 0; p.jumping = true; dust(p); }
-                else if (wallDir) { p.vy = -11.6; p.vx = -wallDir * 6.4; p.wallLock = 10; p.face = -wallDir; p.jumpBuf = 0; p.jumping = true; dust(p); }
-                else if (p.airJumps > 0) { p.vy = -10.8; p.airJumps--; p.jumpBuf = 0; p.jumping = true; burst(p.x + 10, p.y + 30, "#cfe9ff", 8); }
+                if (p.coyote > 0) { p.vy = JUMP; p.coyote = 0; p.jumpBuf = 0; p.jumping = true; dust(p); MetroFx.play("jump"); }
+                else if (wallDir) { p.vy = -11.6; p.vx = -wallDir * 6.4; p.wallLock = 10; p.face = -wallDir; p.jumpBuf = 0; p.jumping = true; dust(p); MetroFx.play("jump"); }
+                else if (p.airJumps > 0) { p.vy = -10.8; p.airJumps--; p.jumpBuf = 0; p.jumping = true; burst(p.x + 10, p.y + 30, "#cfe9ff", 8); MetroFx.play("wing"); }
             }
             if (!K.jump && p.jumping && p.vy < -4) { p.vy *= .55; p.jumping = false; }        // variable jump height
         }
@@ -238,14 +238,14 @@ const Metro = (() => {
         /* attack */
         if (K.atkP && p.attackCd <= 0 && p.dashT <= 0 && !p.healT) {
             p.attackDir = K.up ? "up" : (K.down && !p.onGround) ? "down" : "fwd";
-            p.attackT = 8; p.attackCd = hasCharm("heavy") ? 28 : 20; p.hit = new Set();
+            p.attackT = 8; p.attackCd = hasCharm("heavy") ? 28 : 20; p.hit = new Set(); MetroFx.play("swing");
         }
         /* soul bolt */
-        if (K.spP && p.soul >= 33 && p.spCd <= 0) { p.soul -= 33; p.spCd = 30; S.shots.push({ x: p.x + 10, y: p.y + 12, vx: p.face * 9, life: 70, w: 18, h: 12, dmg: 3 }); }
+        if (K.spP && p.soul >= 33 && p.spCd <= 0) { p.soul -= 33; p.spCd = 30; MetroFx.play("shot"); S.shots.push({ x: p.x + 10, y: p.y + 12, vx: p.face * 9, life: 70, w: 18, h: 12, dmg: 3 }); }
 
         const r = move(p, p.vx, p.vy);
         if (r.hx) { p.vx = 0; if (p.dashT > 0) p.dashT = 0; }
-        if (r.hy) { if (p.vy < 0) p.vy = 0; else p.vy = 0; if (r.landed && !p.onGround) dust(p); }
+        if (r.hy) { p.vy = 0; if (r.landed && !p.onGround) { dust(p); MetroFx.play("land"); } }
 
         if (p.attackT > 0) { p.attackT--; playerHits(); }
 
@@ -272,7 +272,7 @@ const Metro = (() => {
         S.enemies.forEach(e => {
             if (e.dead || p.hit.has(e) || !overlap(rc, e)) return;
             p.hit.add(e); damageEnemy(e, dmg, p.face);
-            p.soul = Math.min(99, p.soul + (hasCharm("catcher") ? 17 : 11)); S.hitstop = 3; S.shake = Math.max(S.shake, 3);
+            p.soul = Math.min(99, p.soul + (hasCharm("catcher") ? 17 : 11)); S.hitstop = Math.max(S.hitstop, MetroFx.freeze(3)); S.shake = Math.max(S.shake, 3); MetroFx.play("hit");
             if (d === "down") pogo = true;
         });
         for (let ty = Math.floor(rc.y / TS); ty <= Math.floor((rc.y + rc.h) / TS); ty++)
@@ -292,7 +292,7 @@ const Metro = (() => {
             R.g[b][a] = "."; m.broken.push(R.id + ":" + a + "," + b); burst(a * TS + 16, b * TS + 16, "#8a7a68", 6);
             q.push([a + 1, b], [a - 1, b], [a, b + 1], [a, b - 1]);
         }
-        S.shake = 6; renderRoomCache(); saveGame();
+        S.shake = 6; renderRoomCache(); saveGame(); MetroFx.play("secret");
         toast("A hidden passage opens…");
     }
 
@@ -311,11 +311,11 @@ const Metro = (() => {
     function damageEnemy(e, dmg, dirFace) {
         e.hp -= dmg; e.flash = 6; burst(e.x + e.w / 2, e.y + e.h / 2, "#e8edf3", 6);
         if (e.t !== "warden") { e.vx = dirFace * 4; e.vy = -3; if (e.t === "flyer") e.st = "recover", e.tm = 40; }
-        else if (e.phase === 1 && e.hp <= 22) { e.phase = 2; S.shake = 14; toast("The Warden's hollow shell cracks…"); }
+        else if (e.phase === 1 && e.hp <= 22) { e.phase = 2; S.shake = 14; S.phaseFlash = 40; MetroFx.play("phase"); toast("The Warden's hollow shell cracks…"); }
         if (e.hp <= 0) killEnemy(e);
     }
     function killEnemy(e) {
-        e.dead = true; burst(e.x + e.w / 2, e.y + e.h / 2, "#cfe9ff", e.t === "warden" ? 60 : 14); S.shake = e.t === "warden" ? 20 : 4;
+        e.dead = true; burst(e.x + e.w / 2, e.y + e.h / 2, "#cfe9ff", e.t === "warden" ? 60 : 14); S.shake = e.t === "warden" ? 20 : 4; MetroFx.play(e.t === "warden" ? "bigdeath" : "kill");
         const geo = e.t === "warden" ? 150 : E_DEF[e.t].geo, n = e.t === "warden" ? 15 : geo, v = geo / n;
         for (let i = 0; i < n; i++) S.coins.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, vx: rnd(-3, 3), vy: rnd(-7, -2), v, w: 8, h: 8 });
         if (e.t === "warden") {
@@ -343,13 +343,13 @@ const Metro = (() => {
         } else if (e.t === "flyer") {
             if (e.st === "idle") {
                 e.x += (e.home.x - e.w / 2 - e.x) * .02; e.y = e.home.y + Math.sin(S.t / 25 + e.home.x) * 14; e.vx *= .8;
-                if (dist < 300 && e.tm <= 0) { e.st = "wind"; e.tm = 32; }
+                if (dist < 300 && e.tm <= 0) { e.st = "wind"; e.tm = 32; MetroFx.play("tell"); }
             } else if (e.st === "wind") { if (e.tm <= 0) { e.st = "lunge"; e.tm = 26; const n = dist || 1; e.vx = dx / n * 7.5; e.vy = dy / n * 7.5; } }
             else if (e.st === "lunge") { e.x += e.vx; e.y += e.vy; if (e.tm <= 0 || hitsSolid(e.x, e.y, e.w, e.h)) { e.st = "recover"; e.tm = 60; } }
             else if (e.st === "recover") { e.x += (e.home.x - e.w / 2 - e.x) * .04 + e.vx * .1; e.y += (e.home.y - e.y) * .04; e.vx *= .9; if (e.tm <= 0) { e.st = "idle"; e.tm = 90; } }
         } else if (e.t === "spitter") {
             e.face = dx > 0 ? 1 : -1;
-            if (e.st === "idle" && dist < 440 && e.tm <= 0) { e.st = "wind"; e.tm = 24; }
+            if (e.st === "idle" && dist < 440 && e.tm <= 0) { e.st = "wind"; e.tm = 24; MetroFx.play("tell"); }
             else if (e.st === "wind" && e.tm <= 0) { shootAt(e, e.face * 3.4, -5.2, .26, 6); e.st = "idle"; e.tm = 120; }
             e.vy = Math.min(e.vy + G, 10); move(e, 0, e.vy);
         } else if (e.t === "warden") stepWarden(e, dx);
@@ -363,7 +363,7 @@ const Metro = (() => {
             e.face = dx > 0 ? 1 : -1; e.vx = 0;
             if (e.tm <= 0) {
                 const pick = Math.random(); e.pat = pick < .45 ? "charge" : (ph2 && pick > .75) ? "rain" : "slam";
-                e.st = "wind"; e.tm = e.pat === "charge" ? (ph2 ? 30 : 40) : e.pat === "rain" ? 34 : 34;
+                e.st = "wind"; e.tm = e.pat === "charge" ? (ph2 ? 30 : 40) : e.pat === "rain" ? 34 : 34; MetroFx.play("tell");
             }
         } else if (e.st === "wind") {                      // telegraph (flashes + crouch)
             if (e.tm <= 0) {
@@ -447,7 +447,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
 
     function rest() {
         const p = P;
-        p.hp = m.hpMax; m.bench = { room: R.id, x: R.bench.x }; S.restFlash = 50; m.geoDirty = false;
+        p.hp = m.hpMax; m.bench = { room: R.id, x: R.bench.x }; S.restFlash = 50; m.geoDirty = false; MetroFx.play("rest");
         loadRoom(R.id, null);                                           // enemies come back when you rest
         saveGame(); toast("Rested. Progress saved.");
     }
@@ -461,6 +461,9 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         else if (t === "dmg") { m.dmg++; S.popup = { title: "Whetstone", text: "Your blade cuts deeper.", t: 200 }; }
         else if (t === "heart") { S.popup = { title: "Heart of the Hollow", text: "The kingdom's pulse returns. You may keep exploring.", t: 400 }; }
         m.collected.push(it.id); it.gone = true; burst(it.x, it.y, "#f6e7ae", 20); saveGame();
+        const big = t.startsWith("ability:") || t.startsWith("charm:") || t === "hp" || t === "dmg" || t === "heart";
+        MetroFx.play(big ? "unlock" : "pickup");
+        if (big) S.ring = { x: P.x + P.w / 2, y: P.y + P.h / 2, t: 0, max: 60, col: t.startsWith("ability:") ? "#f6e7ae" : "#cfe9ff" };
     }
 
     const NPC_LINES = q => q === 0 ? ["Old Wick: Another wanderer in the dark…", "Old Wick: Three Glow Shards lie scattered through these halls. Bring them to me.", "Old Wick: I will trade you a charm for them."]
@@ -483,7 +486,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         S.t++;
         if (S.dead) {
             S.deadT++;
-            if (S.deadT > 80) { const b = m.bench; P.hp = m.hpMax; P.soul = 0; P.invuln = 60; P.vx = P.vy = 0; S.dead = 0; loadRoom(b.room, { x: b.x - P.w / 2, y: 22 * TS - P.h - 1 }); }
+            if (S.deadT > MetroFx.deadFrames()) { const b = m.bench; P.hp = m.hpMax; P.soul = 0; P.invuln = 60; P.vx = P.vy = 0; S.dead = 0; loadRoom(b.room, { x: b.x - P.w / 2, y: 22 * TS - P.h - 1 }); }
             return;
         }
         if (K.upP) { K.upP = false; interact(); }
@@ -502,6 +505,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         S.parts.forEach(q => { q.x += q.vx; q.y += q.vy; q.vy += .12; q.life--; });
         S.parts = S.parts.filter(q => q.life > 0).slice(-220);
         if (S.banner > 0) S.banner--; if (S.shake > 0) S.shake *= .85; if (S.restFlash > 0) S.restFlash--;
+        if (S.phaseFlash > 0) S.phaseFlash--; if (S.hudPulse > 0) S.hudPulse--; if (S.ring && ++S.ring.t > S.ring.max) S.ring = null;
         if (S.popup && --S.popup.t <= 0) S.popup = null; if (S.toast && --S.toast.t <= 0) S.toast = null;
         S.enemies = S.enemies.filter(e => !e.dead || e.t === "warden");
         updateCam();
@@ -565,17 +569,17 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
             skyCache = { key: skyKey, g };
         }
         ctx.fillStyle = skyCache.g; ctx.fillRect(0, 0, innerWidth, innerHeight);
-        const sh = S.shake > .5 ? [rnd(-S.shake, S.shake), rnd(-S.shake, S.shake)] : [0, 0];
+        const shk = S.shake * MetroFx.shakeScale(); const sh = shk > .5 ? [rnd(-shk, shk), rnd(-shk, shk)] : [0, 0];
         ctx.save(); ctx.scale(scale, scale); ctx.translate(-Math.round(cam.x) + sh[0], -Math.round(cam.y) + sh[1]);
         ctx.drawImage(bgCache[0], cam.x * .6, cam.y * .6); ctx.drawImage(bgCache[1], cam.x * .3, cam.y * .3);
         ctx.drawImage(roomCache, 0, 0);
         if (R.bench) drawBench(R.bench.x);
         if (R.npc) drawNpc(R.npc.x);
         S.items.forEach(drawItem); S.coins.forEach(c => { ctx.fillStyle = "#cfe3f0"; ctx.beginPath(); ctx.arc(c.x + 4, c.y + 4, 4, 0, 7); ctx.fill(); });
-        S.enemies.forEach(drawEnemy);
+        S.enemies.forEach(drawEnemy); drawTelegraphs();
         S.eshots.forEach(s => { ctx.fillStyle = s.ground ? "#e8edf3" : "#b8ff9a"; ctx.globalAlpha = .9; ctx.beginPath(); ctx.ellipse(s.x + s.w / 2, s.y + s.h / 2, s.w / 2, s.h / 2, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1; });
         S.shots.forEach(s => { ctx.fillStyle = "#cfe9ff"; ctx.shadowColor = "#9fd0ff"; ctx.shadowBlur = 10; ctx.fillRect(s.x, s.y, s.w, s.h); ctx.shadowBlur = 0; });
-        drawPlayer();
+        drawPlayer(); drawRing();
         S.parts.forEach(q => { ctx.globalAlpha = Math.min(1, q.life / 12); ctx.fillStyle = q.col; ctx.fillRect(q.x, q.y, q.s, q.s); }); ctx.globalAlpha = 1;
         ctx.restore();
         if (window.Scenery) Scenery.draw(ctx, { cameraX: cam.x * scale, world: R.theme, player: { x: (P.x - cam.x) * scale + cam.x * scale, y: (P.y - cam.y) * scale, width: P.w * scale, height: P.h * scale } });
@@ -613,6 +617,34 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         }
         ctx.restore();
     }
+    /* Telegraph assist: shape cues that never depend on colour. A "!" marker
+       above any enemy that is winding up; the Warden also shows a dashed line
+       (charge) or ring (slam) where its attack will land. */
+    function drawTelegraphs() {
+        if (!MetroFx.telegraphOn()) return;
+        S.enemies.forEach(e => {
+            if (e.dead || e.st !== "wind") return;
+            const cx = e.x + e.w / 2, top = e.y - 8;
+            ctx.save();
+            ctx.beginPath(); ctx.moveTo(cx, top - 20); ctx.lineTo(cx + 8, top - 6); ctx.lineTo(cx - 8, top - 6); ctx.closePath();
+            ctx.fillStyle = "#f6e7ae"; ctx.strokeStyle = "#0a0f18"; ctx.lineWidth = 2.5; ctx.fill(); ctx.stroke();
+            ctx.fillStyle = "#0a0f18"; ctx.fillRect(cx - 1.5, top - 17, 3, 7); ctx.fillRect(cx - 1.5, top - 9, 3, 2.2);
+            if (e.t === "warden") {
+                const y = e.y + e.h - 2;
+                ctx.setLineDash([8, 6]); ctx.strokeStyle = "#ffd0d0"; ctx.lineWidth = 3;
+                if (e.pat === "charge") { ctx.beginPath(); ctx.moveTo(cx, y); ctx.lineTo(cx + e.face * 9 * TS, y); ctx.stroke(); }
+                else if (e.pat === "slam") { ctx.beginPath(); ctx.ellipse(cx, y, 56, 9, 0, 0, 7); ctx.stroke(); }
+            }
+            ctx.restore();
+        });
+    }
+    /* Unlock / pickup ring: a gold ring that widens from Milo and fades. */
+    function drawRing() {
+        const r = S.ring; if (!r) return;
+        const k = Math.min(1, r.t / r.max), rad = 10 + k * 46;
+        ctx.save(); ctx.globalAlpha = 1 - k; ctx.strokeStyle = r.col; ctx.lineWidth = 3 * (1 - k) + 1;
+        ctx.beginPath(); ctx.arc(r.x, r.y, rad, 0, 7); ctx.stroke(); ctx.restore();
+    }
     function drawItem(it) {
         const y = it.y + Math.sin(it.bob) * 4; ctx.save(); ctx.translate(it.x, y);
         const col = it.t.startsWith("ability") ? "#f6e7ae" : it.t.startsWith("charm") ? "#a98be0" : it.t === "heart" ? "#ff9aa8" : "#8fc1e3";
@@ -624,7 +656,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     function drawHUD() {
         const W = innerWidth, H = innerHeight; ctx.save();
         for (let i = 0; i < m.hpMax; i++) {                                         // masks
-            const x = 18 + i * 26, y = 22; ctx.beginPath(); ctx.ellipse(x, y, 9, 11, 0, 0, 7); ctx.fillStyle = i < P.hp ? "#e8edf3" : "rgba(10,14,22,.8)"; ctx.fill();
+            const x = 18 + i * 26, y = 22, lost = S.hudPulse > 0 && i === P.hp; ctx.beginPath(); ctx.ellipse(x, y, lost ? 12 : 9, lost ? 14 : 11, 0, 0, 7); ctx.fillStyle = i < P.hp ? "#e8edf3" : "rgba(10,14,22,.8)"; ctx.fill();
             ctx.strokeStyle = "#8d9bb0"; ctx.lineWidth = 2; ctx.stroke();
             if (i < P.hp) { ctx.fillStyle = "#0a0f18"; ctx.fillRect(x - 5, y - 2, 3, 5); ctx.fillRect(x + 2, y - 2, 3, 5); }
         }
@@ -640,7 +672,8 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         if (S.toast) { ctx.globalAlpha = Math.min(1, S.toast.t / 30); ctx.font = "600 15px Inter,sans-serif"; ctx.fillStyle = "#e8edf3"; ctx.fillText(S.toast.text, W / 2, H * .3); ctx.globalAlpha = 1; }
         if (S.popup) { const w2 = Math.min(480, W - 40); ctx.fillStyle = "rgba(10,14,22,.9)"; ctx.fillRect((W - w2) / 2, H * .38, w2, 92); ctx.strokeStyle = "#8d9bb0"; ctx.strokeRect((W - w2) / 2, H * .38, w2, 92); ctx.fillStyle = "#f6e7ae"; ctx.font = "700 20px Cinzel,serif"; ctx.fillText(S.popup.title, W / 2, H * .38 + 36); ctx.fillStyle = "#e8edf3"; ctx.font = "14px Inter,sans-serif"; ctx.fillText(S.popup.text, W / 2, H * .38 + 64); }
         if (S.dialog) { const w2 = Math.min(640, W - 30); ctx.fillStyle = "rgba(10,14,22,.94)"; ctx.fillRect((W - w2) / 2, H - 150, w2, 110); ctx.strokeStyle = "#8d9bb0"; ctx.strokeRect((W - w2) / 2, H - 150, w2, 110); ctx.fillStyle = "#e8edf3"; ctx.font = "16px Inter,sans-serif"; ctx.fillText(S.dialog.lines[S.dialog.i], W / 2, H - 92); ctx.fillStyle = "#8d9bb0"; ctx.font = "12px Inter,sans-serif"; ctx.fillText("press attack / jump", W / 2, H - 56); }
-        if (S.restFlash > 0) { ctx.fillStyle = `rgba(207,233,255,${S.restFlash / 120})`; ctx.fillRect(0, 0, W, H); }
+        if (S.restFlash > 0 && MetroFx.flashOK()) { ctx.fillStyle = `rgba(207,233,255,${S.restFlash / 120})`; ctx.fillRect(0, 0, W, H); }
+        if (S.phaseFlash > 0 && MetroFx.flashOK()) { ctx.fillStyle = `rgba(255,214,214,${S.phaseFlash / 160})`; ctx.fillRect(0, 0, W, H); }
         if (S.dead) { const a = Math.min(1, S.deadT / 40); ctx.fillStyle = `rgba(0,0,0,${a * .85})`; ctx.fillRect(0, 0, W, H); ctx.fillStyle = `rgba(232,237,243,${a})`; ctx.font = "700 34px Cinzel,serif"; ctx.fillText("YOU FELL", W / 2, H / 2); }
         ctx.restore();
     }
@@ -671,10 +704,13 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     function openPause() {
         panel(`<div class="menu-card"><div class="eyebrow">Paused</div><h1>${R.name}</h1>
           <p class="settings-note">Move A/D · Jump Space · Attack F/J (hold ↑/↓ to aim) · Dash Shift · Soul bolt E · Heal hold Q · Map M · Rest/Talk ↑</p>
-          <div class="account-actions"><button class="game-button primary" id="mp-res">Resume</button><button class="game-button" id="mp-map">🗺 Map</button><button class="game-button" id="mp-ch">Charms (at benches)</button><button class="game-button" id="mp-exit">Exit to Home</button></div></div>`, p => {
-            p.querySelector("#mp-res").onclick = closePanel; p.querySelector("#mp-map").onclick = openMap; p.querySelector("#mp-ch").onclick = openCharms;
+          <div class="account-actions"><button class="game-button primary" id="mp-res">Resume</button><button class="game-button" id="mp-map">🗺 Map</button><button class="game-button" id="mp-ch">Charms (at benches)</button><button class="game-button" id="mp-opt">⚙ Options</button><button class="game-button" id="mp-exit">Exit to Home</button></div></div>`, p => {
+            p.querySelector("#mp-res").onclick = closePanel; p.querySelector("#mp-map").onclick = openMap; p.querySelector("#mp-ch").onclick = openCharms; p.querySelector("#mp-opt").onclick = openOptions;
             p.querySelector("#mp-exit").onclick = () => { stop(); showHome(); };
         });
+    }
+    function openOptions() {
+        panel(`<div class="menu-card" style="width:min(640px,100%)"><div class="eyebrow">Options</div><h1>Descent options</h1>${MetroFx.optionsHTML()}<p class="settings-note">Changes apply immediately and are saved with your progress.</p><button class="game-button primary" id="mo-back">Back</button></div>`, p => { p.querySelector("#mo-back").onclick = openPause; });
     }
     function openMap() {
         panel(`<div class="menu-card" style="width:min(820px,100%)"><div class="eyebrow">Map</div><canvas id="metro-map" width="760" height="380" style="width:100%"></canvas>
@@ -741,7 +777,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
             b.addEventListener("contextmenu", e => e.preventDefault());
             t.appendChild(b);
         };
-        btn("l", "◀", "left"); btn("r", "▶", "right"); btn("j", "⤒", "jump", "jumpP"); btn("a", "⚔", "atk", "atkP"); btn("d", "≫", "dash", "dashP"); btn("s", "✦", "sp", "spP"); btn("u", "↑", "up", "upP");
+        btn("l", "◀", "left"); btn("r", "▶", "right"); btn("j", "⤒", "jump", "jumpP"); btn("a", "⚔", "atk", "atkP"); btn("d", "≫", "dash", "dashP"); btn("s", "✦", "sp", "spP"); btn("u", "↑", "up", "upP"); btn("h", "♥", "heal");
         if ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0) t.classList.remove("hidden");
     }
 
