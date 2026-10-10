@@ -15,9 +15,10 @@ js/saveSystem.js  serialize, debounced auto-save, cloud sync
 js/gacha.js       banners, rarity pools, pity, history
 js/gachaAnimation.js  cinematic wish canvas animation
 js/ui.js          wish screen, account panel, toasts
-js/metroid.js     "The Hollow Descent" Metroidvania mode (rooms, physics, combat, boss, map, charms)
-docs/DESIGN.md    full design doc: mechanics, map, progression, combat, enemies, tech plan, tests
-tests/metro.test.js  automated simulation tests (node tests/metro.test.js)
+js/metroid.js     "The Hollow Descent" Metroidvania mode (rooms, physics, abilities, combat, boss, map, charms)
+js/metroFx.js     Descent feedback: screen shake, flashes, hit-stop, telegraph assist, sound effects, Options rows
+docs/DESIGN.md    full design doc. Tags show what is built: [BUILT], [STAGE n] (scheduled), [PLANNED]
+tests/metro.test.js  automated simulation tests for the Descent (node tests/metro.test.js)
 js/scenery.js     particles, fog, lighting, procedural ambient audio
 supabase/schema.sql   database table + security policies
 ```
@@ -101,18 +102,59 @@ Push the folder to GitHub → import in Vercel → Framework preset **Other**, n
 - Cloud saves unavailable: the game keeps working locally; check `config.js` and that Anonymous sign-ins are enabled in Supabase.
 
 ## The Hollow Descent (Metroidvania mode)
-Home -> **Descend**. Your normal level mode is untouched (now called **Levels**). The Descent uses your selected hero's look, shares Geo with the shrine, and saves into `save.metro` (so it syncs to the cloud like everything else). Full design: `docs/DESIGN.md`.
+Home -> **Descend**. Your normal level mode is untouched (now called **Levels**). The Descent uses your selected hero's look, shares Geo with the shrine, and saves into `save.metro` (so it syncs to the cloud like everything else). Design and staging: `docs/DESIGN.md`.
 
-**Controls:** A/D or arrows move - Space jump (hold = higher) - F/J attack (hold Up/Down to aim; Down in the air = pogo) - Shift/L dash - E soul bolt - hold Q heal - Up = rest at bench / talk - M map - C charms (at benches) - Esc pause. Touch devices get on-screen buttons.
+**Controls:** A/D or arrows move · Space jump (hold = higher) · F/J attack (hold Up/Down to aim; Down in the air = pogo) · Shift/L dash · E soul bolt · hold Q heal · **R Lantern Sight** · **G Bell Hook** (aims with the held direction) · **Down + Space in the air = Sinking Weight dive** · Up = rest at bench / talk · M map · C charms (at benches) · Esc pause.
+Touch devices get on-screen buttons, including ✺ Lantern, ⟲ Hook and ▼ Down.
 
-**Route:** Gate -> Moss -> Fungal (Shade Cloak / dash) -> Chasm (needs dash; bench + Old Wick) -> Climb (Wall Claw) -> shaft -> Spire (Moth Wing / double jump) -> Warden's Hall (boss). Backtrack with new abilities for the Hidden Loft (above Moss), the cracked wall in Fungal, Mask Shards, Whetstone, charms, and Old Wick's Glow Shard quest.
+### Abilities
+| Ability | Control | Found in | Used for |
+|---|---|---|---|
+| Shade Cloak | Shift / L | Fungal Descent (r2) | the Chasm gap (r3) |
+| Wall Claw | jump into a wall | The Climb (r4) | the wall-jump shaft to the Spire (r5) |
+| Moth Wing | jump again in the air | The Spire (r5) | the Bellwork ledge (r8); a Wall Claw climb up the brittle column also reaches it |
+| Lantern Sight | R | Hidden Loft (r7, above Moss) | the seal at the east end of The Climb |
+| Sinking Weight | Down + Space in the air | Bellwork Gate ledge (r8) | breaking the brittle column into Anchor Hall (r9) |
+| Bell Hook | G | Clapper Loft (r10) | the bell anchor in Anchor Hall, and the mask shard above it |
 
-**Extend it:** rooms are ASCII-free helper calls in `js/metroid.js` (`mk("id", "Name", gridX, gridY, worldTheme, exits, a => { a.pl(...); a.item(...); a.en(...) })`). Add a room, link `exits` both ways, and run `node tests/metro.test.js` (it checks exits, item placement and every ability gate).
+- **Lantern Sight:** places a 4-tile Lumen platform in the air under your feet. It can catch a fall, lasts about 3 seconds and flickers in its last second. Enemies within 4.5 tiles are stunned for 1.5 s and nearby shots are cleared. 1.5 s cooldown.
+- **Sinking Weight:** Down + Space in the air starts a straight dive. The landing shockwave hurts enemies within 2 tiles and shatters brittle stone (`B`) within 3 tiles sideways and 5 tiles up. Broken stone stays broken.
+- **Bell Hook:** an instant ray up to 11 tiles along your aim. Stone stops it; a bell anchor (`A`) pulls you to it, and jump lets go. A hit enemy takes 1 damage and is stunned for about 0.7 s.
+- **Seals** are stone blocks with a glyph for one ability: Shade `››`, Claw `///`, Wing leaf, Lantern ring with flame, Sinking downward triangle, Bell ring with dot. A seal is solid until you own its ability, then it is removed for good. Gold markers on the map show sealed gates, bell anchors and abilities you have not found yet.
+
+### Route
+Gate → Moss → Fungal (Shade Cloak) → Chasm (dash) → Climb (Wall Claw) → shaft → Spire (Moth Wing) → Warden's Hall (boss).
+Ravine: the east corridor of The Climb is sealed by Lantern Sight (from the Hidden Loft). Beyond it: Bellwork Gate (ledge with Sinking Weight) → brittle column → Anchor Hall (bell anchor, mask shard) → Clapper Loft (Bell Hook). Backtrack with new abilities for the cracked wall in Fungal, Mask Shards, Whetstone, charms, and Old Wick's Glow Shard quest.
+
+### Options
+Home → **Settings** → Descent rows, or **⚙ Options** in the pause menu (same rows; changes apply at once and are saved with your progress in `save.settings.fx` and `save.settings.audio`):
+- Screen shake (Off / Low / Full)
+- Flashing effects (rest, boss phases, unlocks)
+- Hit-stop (freeze frames on hits)
+- Telegraph assist (`!` markers and dashed danger shapes)
+- Reduced downtime (shorter death fade)
+- Effects volume and Ambient volume (0–100%)
+
+Enemy and boss danger is shown by shape as well as colour, and the Sound toggle also applies to the Descent.
+
+**Extend it:** rooms are helper calls in `js/metroid.js`: `mk("id", "Name", gridX, gridY, worldTheme, exits, a => { a.pl(...); a.item(...); a.en(...) })`. Add a room, link `exits` both ways, and run the tests (they check exits, map placement, items and enemies outside walls, and every ability gate). Tile legend: `#` solid, `=` one-way platform, `^` spikes, `W` cracked wall (attack), `B` brittle stone (Sinking Weight), `A` bell anchor, and one seal letter per ability (`d c w l k h`, see `SEAL_AB`). A new seal needs a `SEAL_AB` entry, an ability in `ABIL`, and a branch in `drawSeal`.
+
+### Testing
+```bash
+node tests/metro.test.js
+```
+Runs the real Descent physics headlessly (no browser needed) and prints one PASS/FAIL line per check (56 at the moment). It covers room data, each ability gate (dash chasm, double-jump ledge, wall shaft, Lantern seal, Lumen catch, Moth Wing and Wall Claw ledge, brittle column, dive shockwave, Bell Hook latch/release/wall stop), combat, the Warden fight, the options, save normalisation, and a random-input fuzz in every room with all abilities. When you add a room or ability, add a check next to the related block, run the file, then commit. Visual changes (art, seals, map) still need a quick look in a browser.
 
 ### Manual test checklist
-- Movement: coyote jump, variable jump height, wall slide/jump, dash i-frames, double jump, pogo on enemy and spikes.
+- Movement: coyote jump, variable jump height, wall slide/jump, dash i-frames, double jump, pogo on enemy and spikes, dive and hook.
+- Lantern Sight: pulse under a fall catches you; stunned enemies stop; Lumen flickers and disappears.
+- Ravine: the seal opens with Lantern Sight; the dive breaks the column low down; Bell Hook pulls you to the anchor and jump lets go.
 - Combat: hit-stop/knockback, 70-frame invulnerability, Soul gain, heal interrupted by damage, soul bolt cost.
 - Boss: telegraphs readable, door locks, phase 2 at 50 %, death drops Geo + Heart.
-- Saving: rest at bench, quit to Home, reload page -> same bench, abilities, charms, broken wall, items. Sign in -> same progress on another device.
-- UI: map reveals rooms as visited (dashed `?` for unexplored neighbours), charm notches limit, pause menu, touch buttons.
+- Options: each row changes its effect immediately and survives a reload.
+- Saving: rest at bench, quit to Home, reload page -> same bench, abilities, seals, broken stone, charms, items. Sign in -> same progress on another device.
+- UI: map shows markers and reveals rooms as visited (dashed `?` for unexplored neighbours), charm notches limit, pause menu, touch buttons (✺ ⟲ ▼ included) with no stuck input after release.
 - Performance: stays ~60 fps (rooms render from a cached canvas; Scenery lowers its quality automatically if FPS drops).
+
+### Status
+Built: the Descent rooms from Hollow Gate to Clapper Loft (including Bellwork Ravine r8–r10) and Warden's Hall, six abilities, and the feedback options. Not built yet: the remaining zones, most bosses, the full art overhaul, and touch controls beyond R, G and Down. Those are staged in `docs/DESIGN.md`.

@@ -24,6 +24,9 @@ const Scenery = (() => {
 
     let world = 0, lastCam = 0, parts = [];
 
+    /* Ambient volume from Settings > Ambient volume (0-100, default 100). */
+    const ambientLevel = () => { const sv = (typeof window.getSaveData === "function") ? window.getSaveData() : save; const a = sv.settings && sv.settings.audio; return a && typeof a.ambient === "number" ? Math.max(0, Math.min(1, a.ambient / 100)) : 1; };
+
     /* ------------------------- visuals -------------------------
        Everything expensive (gradients, glows, fog, vignette) is rendered ONCE
        into small offscreen canvases and then just blitted with drawImage.
@@ -211,7 +214,7 @@ const Scenery = (() => {
         initAudio(); if (!ac) return;
         if (ac.state === "suspended") ac.resume();
         applyWorldAudio(2.5);
-        fadeTo(save.settings.music ? .5 : 0, .8);        // ambience follows the Music toggle
+        fadeTo(save.settings.music ? .5 * ambientLevel() : 0, .8);        // ambience follows the Music toggle and its volume
     }
     function pauseAmbient() { fadeTo(0, .4); }
 
@@ -221,7 +224,13 @@ const Scenery = (() => {
         initAudio();
         if (!ac) return;
         if (on && ac.state === "suspended") ac.resume();
-        fadeTo(on ? .5 : 0, .25);
+        fadeTo(on ? .5 * ambientLevel() : 0, .25);
+    }
+
+    /* Called when the ambient volume slider changes: update the level right away. */
+    function setVolume(v) {
+        if (!ac || !save.settings || !save.settings.music) return;
+        fadeTo(.5 * Math.max(0, Math.min(1, v)), .25);
     }
 
     /* Reset the camera delta tracking after teleports / room changes so
@@ -233,6 +242,6 @@ const Scenery = (() => {
     /* Browsers only allow audio after a user gesture. */
     ["pointerdown", "keydown"].forEach(ev => addEventListener(ev, () => { if (ac && ac.state === "suspended") ac.resume(); }, { passive: true }));
 
-    return { draw, setWorld, pauseAmbient, applyMusicPref, resetCamera, THEMES };
+    return { draw, setWorld, pauseAmbient, applyMusicPref, setVolume, resetCamera, THEMES };
 })();
 window.Scenery = Scenery;

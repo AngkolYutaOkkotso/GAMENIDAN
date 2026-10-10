@@ -86,6 +86,9 @@ function applySave(data) {
 }
 
 let save = loadSave();
+/* Accessor for scripts that load before this file (metroFx.js, scenery.js). Reading the
+   global by name from an earlier script is not reliable across environments; this is. */
+window.getSaveData = () => save;
 
 function saveGame() {
     save.savedAt = Date.now();

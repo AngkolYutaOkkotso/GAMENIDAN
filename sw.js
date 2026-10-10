@@ -1,8 +1,8 @@
 /* Offline cache. Static files only: stale-while-revalidate, so repeat visits load instantly
    and updates arrive on the next reload. Bump VERSION on each deploy to purge old files. */
-const VERSION = "hollow-milo-v5";
+const VERSION = "hollow-milo-v7";
 const CORE = ["./", "index.html", "style.css", "config.js", "js/game.js", "js/scenery.js", "js/gachaAnimation.js",
-              "js/gacha.js", "js/auth.js", "js/saveSystem.js", "js/ui.js", "js/metroid.js",
+              "js/gacha.js", "js/auth.js", "js/saveSystem.js", "js/ui.js", "js/metroid.js", "js/metroFx.js",
               "fonts/cinzel-latin-500-normal.woff2", "fonts/cinzel-latin-700-normal.woff2"];
 
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
