@@ -367,7 +367,7 @@ h1,h2,.game-title,.eyebrow,.game-button,.back-button,.level-button{font-family:"
 .tbtn:active{transform:scale(.92);background:rgba(90,120,170,.75)}
 .tbtn.l{left:12px;bottom:34px}.tbtn.r{left:92px;bottom:34px}.tbtn.u{left:52px;bottom:112px;width:54px;height:54px}
 .tbtn.j{right:12px;bottom:34px}.tbtn.a{right:92px;bottom:34px}.tbtn.d{right:12px;bottom:114px}.tbtn.s{right:92px;bottom:114px}
-.tbtn.h{right:172px;bottom:34px}
+.tbtn.h{right:172px;bottom:34px}.tbtn.p{right:172px;bottom:114px}.tbtn.g{right:252px;bottom:34px}.tbtn.dn{left:132px;bottom:34px}
 
 /* =========================================================
    POLISH PASS: entrances, responsive layout, touch comfort

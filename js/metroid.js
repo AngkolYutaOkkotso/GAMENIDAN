@@ -10,7 +10,18 @@ const Metro = (() => {
     const G = .62, MAXFALL = 13, RUN = 4.4, JUMP = -12.2, DASH_V = 13, DASH_T = 12, VIEW_H = 560;
     const ABIL = { dash: ["Shade Cloak", "Press Shift / L to dash. Dashing makes you invulnerable."],
                    wall: ["Wall Claw", "Press toward a wall and jump to climb it."],
-                   dbl:  ["Moth Wing", "Press jump again in mid-air."] };
+                   dbl:  ["Moth Wing", "Press jump again in mid-air."],
+                   lantern: ["Lantern Sight", "Press R to light a Lumen platform under your feet. Lumen stuns nearby enemies and lasts a few seconds."],
+                   sink: ["Sinking Weight", "In mid-air press Down and Jump to dive. The landing shatters brittle stone and hurts enemies nearby."],
+                   hook: ["Bell Hook", "Press G to hook along your aim (hold up, down, left or right). Latch onto a bell anchor to be pulled to it; jump to let go."] };
+    const ABIL_KEYS = Object.keys(ABIL);
+    /* Seal glyphs: one per ability. A seal is solid until its ability is owned. */
+    const SEAL_AB = { d: "dash", c: "wall", w: "dbl", l: "lantern", k: "sink", h: "hook" };
+    const SEAL_CH = {};
+    Object.keys(SEAL_AB).forEach(ch => { SEAL_CH[SEAL_AB[ch]] = ch; });
+    const SOLID_CH = new Set(["#", "W", "B"].concat(Object.keys(SEAL_AB)));   // blocks movement, wall-cling and the hook
+    const ONEWAY_CH = new Set(["=", "L"]);                                    // lands from above only
+    const HOOK_RANGE = 11 * TS, SHOCK_R = 2, BREAK_R = 3;                     // tiles
     const CHARMS = { swift:   { name: "Swift Cloak",  cost: 1, desc: "Dash recovers faster." },
                      catcher: { name: "Soul Catcher", cost: 1, desc: "Gain more Soul from hits." },
                      heavy:   { name: "Heavy Blade",  cost: 2, desc: "+1 damage, slower swing." } };
@@ -18,7 +29,9 @@ const Metro = (() => {
     /* =====================================================  DATA  =====
        Rooms are 40x24 tiles. Floor top = row 22. Horizontal exits are
        rows 17-21; vertical exits are 4 columns wide.
-       # solid  . air  = one-way platform  ^ spikes  W breakable wall   */
+       # solid  . air  = one-way platform  ^ spikes  W breakable wall
+       B brittle stone (Sinking Weight)  A bell anchor (Bell Hook)
+       L Lumen platform (Lantern Sight, runtime only)  d c w l k h seals   */
     const ROOMS = {};
     function mk(id, name, gx, gy, theme, ex, fn) {
         const g = Array.from({ length: ROWS }, () => Array(COLS).fill("."));
@@ -31,7 +44,8 @@ const Metro = (() => {
         if (ex.down) fill(ex.down.col, 22, ex.down.col + 3, 23, ".");
         const r = { id, name, gx, gy, theme, ex, g, items: [], enemies: [], bench: null, npc: null, boss: null };
         fn({
-            fill, set, pl: (a, b, y) => fill(a, y, b, y, "="), spikes: (a, b) => fill(a, 22, b, 22, "^"),
+            fill, set, seal: (ab, x1, y1, x2, y2) => fill(x1, y1, x2, y2, SEAL_CH[ab]), anchor: (x, y) => set(x, y, "A"),
+            pl: (a, b, y) => fill(a, y, b, y, "="), spikes: (a, b) => fill(a, 22, b, 22, "^"),
             item: (i, t, x, y) => r.items.push({ id: i, t, x: x * TS + TS / 2, y: y * TS + TS / 2 }),
             en: (t, x, row) => r.enemies.push({ t, x: x * TS + TS / 2, y: row * TS }),
             bench: x => { r.bench = { x: x * TS + TS / 2 }; }, npc: x => { r.npc = { x: x * TS + TS / 2 }; },
@@ -60,11 +74,12 @@ const Metro = (() => {
         a.fill(23, 22, 37, 22, "#");
         a.bench(28); a.npc(33); a.en("flyer", 18, 14); a.en("flyer", 22, 12);
     });
-    mk("r4", "The Climb", 4, 1, 3, { left: "r3", up: { to: "r5", col: 30 } }, a => {
+    mk("r4", "The Climb", 4, 1, 3, { left: "r3", up: { to: "r5", col: 30 }, right: "r8" }, a => {
         a.fill(22, 2, 29, 17); a.fill(34, 2, 37, 21);               // wall-jump shaft: cols 30-33
         a.pl(4, 7, 19); a.pl(10, 13, 16); a.pl(4, 7, 13); a.pl(10, 13, 10);
         a.item("wall", "ability:wall", 8, 21); a.item("shard2", "shard", 11, 9);
         a.en("crawler", 16, 22); a.en("spitter", 19, 22);
+        a.fill(34, 17, 37, 21, ".");  a.seal("lantern", 35, 17, 36, 21);   // east corridor, sealed by Lantern Sight
     });
     mk("r5", "The Spire", 4, 0, 5, { down: { to: "r4", col: 30 }, left: "r6" }, a => {
         a.pl(20, 23, 19); a.pl(24, 27, 16); a.pl(20, 23, 13); a.pl(26, 30, 8);
@@ -77,7 +92,24 @@ const Metro = (() => {
     });
     mk("r7", "Hidden Loft", 1, 0, 2, { down: { to: "r1", col: 18 } }, a => {
         a.bench(6); a.item("mask2", "hp", 30, 21); a.item("swift", "charm:swift", 34, 21); a.item("shard3", "shard", 25, 21);
-        a.item("whet", "dmg", 14, 21);
+        a.item("whet", "dmg", 14, 21); a.item("lantern", "ability:lantern", 19, 21);
+    });
+
+    /* Bellwork Ravine (zone 7): entered through the Lantern seal in The Climb. */
+    mk("r8", "Bellwork Gate", 5, 1, 4, { left: "r4", right: "r9" }, a => {
+        a.pl(12, 19, 16);                               // ledge: Moth Wing or a Wall Claw climb (6 tiles up)
+        a.item("sink", "ability:sink", 14, 15);
+        a.fill(20, 2, 21, 21, "B");                     // brittle column, full height: a Sinking dive shatters its base
+        a.en("crawler", 8, 22); a.en("flyer", 30, 12);
+    });
+    mk("r9", "Anchor Hall", 6, 1, 4, { left: "r8", up: { to: "r10", col: 18 } }, a => {
+        a.anchor(14, 11);                               // bell anchor, within Bell Hook range from the floor
+        a.pl(16, 20, 9); a.item("mask3", "hp", 18, 8);
+        a.bench(8); a.en("flyer", 26, 14); a.en("crawler", 30, 22);
+    });
+    mk("r10", "Clapper Loft", 6, 0, 4, { down: { to: "r9", col: 18 } }, a => {
+        a.pl(8, 13, 17); a.item("hook", "ability:hook", 30, 21);
+        a.bench(24); a.en("crawler", 12, 22); a.en("spitter", 34, 22);
     });
 
     /* ===================================================  STATE  ====== */
@@ -94,7 +126,7 @@ const Metro = (() => {
 
     function ensure() {
         const base = {
-            abilities: { dash: false, wall: false, dbl: false }, visited: ["r0"], collected: [], broken: [],
+            abilities: Object.fromEntries(ABIL_KEYS.map(k => [k, false])), visited: ["r0"], collected: [], broken: [],
             hpMax: 5, dmg: 1, notches: 3, charms: { owned: [], on: [] }, quest: 0, bossDead: false,
             bench: { room: "r0", x: 4 * TS + TS / 2 }
         };
@@ -104,11 +136,7 @@ const Metro = (() => {
         const arr = (v, keep) => Array.isArray(v) ? v.filter(keep) : [];
         const isStr = v => typeof v === "string";
         const m2 = {
-            abilities: {
-                dash: !!(raw.abilities && raw.abilities.dash),
-                wall: !!(raw.abilities && raw.abilities.wall),
-                dbl: !!(raw.abilities && raw.abilities.dbl)
-            },
+            abilities: Object.fromEntries(ABIL_KEYS.map(k => [k, !!(raw.abilities && raw.abilities[k] === true)])),
             visited: arr(raw.visited, v => isStr(v) && !!ROOMS[v]),
             collected: arr(raw.collected, isStr),
             broken: arr(raw.broken, v => {
@@ -143,7 +171,7 @@ const Metro = (() => {
 
     /* ==================================================  PHYSICS  ===== */
     const tileAt = (x, y) => (R.g[y] && R.g[y][x]) || ".";
-    const solid = (tx, ty) => tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS && (R.g[ty][tx] === "#" || R.g[ty][tx] === "W");
+    const solid = (tx, ty) => tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS && SOLID_CH.has(R.g[ty][tx]);
     function hitsSolid(x, y, w, h) {
         const x0 = Math.floor(x / TS), x1 = Math.floor((x + w - .01) / TS), y0 = Math.floor(y / TS), y1 = Math.floor((y + h - .01) / TS);
         for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (solid(tx, ty)) return true;
@@ -152,7 +180,7 @@ const Metro = (() => {
     function oneWayBelow(b) {
         const ty = Math.floor((b.y + b.h + 1) / TS);
         if (ty < 0 || ty >= ROWS || b.y + b.h > ty * TS + 1) return false;
-        for (let tx = Math.floor(b.x / TS); tx <= Math.floor((b.x + b.w - .01) / TS); tx++) if (R.g[ty][tx] === "=") return true;
+        for (let tx = Math.floor(b.x / TS); tx <= Math.floor((b.x + b.w - .01) / TS); tx++) if (ONEWAY_CH.has(R.g[ty][tx])) return true;
         return false;
     }
     const grounded = b => hitsSolid(b.x, b.y + 1, b.w, b.h) || oneWayBelow(b);
@@ -168,7 +196,7 @@ const Metro = (() => {
             const ty = Math.floor((b.y + b.h) / TS);
             if (ty >= 0 && ty < ROWS && b.y + b.h > ty * TS && pb <= ty * TS + .5)
                 for (let tx = Math.floor(b.x / TS); tx <= Math.floor((b.x + b.w - .01) / TS); tx++)
-                    if (R.g[ty][tx] === "=") { b.y = ty * TS - b.h - .001; landed = true; hy = 1; break; }
+                    if (ONEWAY_CH.has(R.g[ty][tx])) { b.y = ty * TS - b.h - .001; landed = true; hy = 1; break; }
         }
         return { hx, hy, landed };
     }
@@ -179,13 +207,14 @@ const Metro = (() => {
     function newPlayer() {
         return { x: 0, y: 0, w: 20, h: 30, vx: 0, vy: 0, face: 1, onGround: false, coyote: 0, jumpBuf: 0, airJumps: 0, airDash: 1, jumping: false,
                  dashT: 0, dashCd: 0, dashInv: 0, dashDir: 1, invuln: 0, attackT: 0, attackCd: 0, attackDir: "fwd", hit: new Set(),
-                 wallLock: 0, wallDir: 0, healT: 0, safeT: 0, hp: m.hpMax, soul: 0, spCd: 0, safe: { x: 0, y: 0 } };
+                 wallLock: 0, wallDir: 0, healT: 0, safeT: 0, hp: m.hpMax, soul: 0, spCd: 0,
+                 lampCd: 0, hookCd: 0, sinking: false, hook: null, safe: { x: 0, y: 0 } };
     }
 
     function hurtPlayer(fromX) {
         const p = P;
         if (p.invuln > 0 || p.dashInv > 0 || S.dead || S.dialog) return;
-        p.hp--; p.invuln = 70; p.healT = 0; p.dashT = 0;
+        p.hp--; p.invuln = 70; p.healT = 0; p.dashT = 0; p.sinking = false; p.hook = null;
         p.vx = (p.x + p.w / 2 < fromX ? -1 : 1) * 5.5; p.vy = -6; p.wallLock = 8;
         S.hitstop = Math.max(S.hitstop, MetroFx.freeze(6)); S.shake = 9; S.hudPulse = 24; burst(p.x + p.w / 2, p.y + p.h / 2, "#e8edf3", 10);
         if (p.hp <= 0) { S.dead = 1; S.deadT = 0; MetroFx.play("bigdeath"); } else MetroFx.play("hurt");
@@ -203,8 +232,13 @@ const Metro = (() => {
         p.wallDir = wallDir;
         if (wallDir) { p.airJumps = ab.dbl ? 1 : 0; p.airDash = 1; }
 
-        p.attackCd--; p.dashCd--; p.invuln--; p.dashInv--; p.spCd--; p.jumpBuf--;
+        p.attackCd--; p.dashCd--; p.invuln--; p.dashInv--; p.spCd--; p.jumpBuf--; p.lampCd--; p.hookCd--;
         if (K.jumpP) p.jumpBuf = 6;
+        /* Bell Hook: a jump lets go of the anchor. Sinking Weight: Down + Jump in mid-air starts a dive. */
+        if (p.hook && K.jumpP) p.hook = null;
+        if (ab.sink && !p.onGround && !p.sinking && !p.hook && p.dashT <= 0 && K.down && K.jumpP) {
+            p.sinking = true; p.jumpBuf = 0; p.vx *= .2; p.vy = 14; MetroFx.play("dive");
+        }
 
         /* heal: hold */
         if (K.heal && p.onGround && p.soul >= 33 && p.hp < m.hpMax && p.attackT <= 0 && p.dashT <= 0) {
@@ -214,7 +248,7 @@ const Metro = (() => {
 
         /* dash */
         if (K.dashP && ab.dash && p.dashCd <= 0 && p.dashT <= 0 && (p.onGround || p.airDash > 0) && !p.healT) {
-            MetroFx.play("dash"); p.dashT = DASH_T; p.dashDir = dir || p.face; p.face = p.dashDir; p.dashCd = hasCharm("swift") ? 24 : 42; p.dashInv = DASH_T + 2;
+            MetroFx.play("dash"); p.hook = null; p.sinking = false; p.dashT = DASH_T; p.dashDir = dir || p.face; p.face = p.dashDir; p.dashCd = hasCharm("swift") ? 24 : 42; p.dashInv = DASH_T + 2;
             if (!p.onGround) p.airDash--; p.vy = 0; burst(p.x + 10, p.y + 15, "#9fb4cf", 8);
         }
 
@@ -227,7 +261,7 @@ const Metro = (() => {
             if (dir && !p.healT) p.face = dir;
             p.vy = Math.min(p.vy + G, MAXFALL);
             if (wallDir && dir === wallDir && p.vy > 0) p.vy = Math.min(p.vy, 2.2);          // wall slide
-            if (p.jumpBuf > 0) {
+            if (p.jumpBuf > 0 && !p.sinking) {
                 if (p.coyote > 0) { p.vy = JUMP; p.coyote = 0; p.jumpBuf = 0; p.jumping = true; dust(p); MetroFx.play("jump"); }
                 else if (wallDir) { p.vy = -11.6; p.vx = -wallDir * 6.4; p.wallLock = 10; p.face = -wallDir; p.jumpBuf = 0; p.jumping = true; dust(p); MetroFx.play("jump"); }
                 else if (p.airJumps > 0) { p.vy = -10.8; p.airJumps--; p.jumpBuf = 0; p.jumping = true; burst(p.x + 10, p.y + 30, "#cfe9ff", 8); MetroFx.play("wing"); }
@@ -243,9 +277,17 @@ const Metro = (() => {
         /* soul bolt */
         if (K.spP && p.soul >= 33 && p.spCd <= 0) { p.soul -= 33; p.spCd = 30; MetroFx.play("shot"); S.shots.push({ x: p.x + 10, y: p.y + 12, vx: p.face * 9, life: 70, w: 18, h: 12, dmg: 3 }); }
 
+        /* new abilities: a dive holds a straight line; the hook pulls toward its anchor */
+        if (p.sinking) { p.vx = 0; p.vy = Math.max(p.vy, 14); }
+        if (K.lampP && ab.lantern && p.lampCd <= 0 && p.dashT <= 0 && !p.healT && !p.sinking) lanternPulse(p);
+        if (K.hookP && ab.hook && p.hookCd <= 0 && !p.hook && p.dashT <= 0 && !p.healT && !p.sinking) fireHook(p);
+        if (p.hook) hookPull(p);
+
         const r = move(p, p.vx, p.vy);
         if (r.hx) { p.vx = 0; if (p.dashT > 0) p.dashT = 0; }
         if (r.hy) { p.vy = 0; if (r.landed && !p.onGround) { dust(p); MetroFx.play("land"); } }
+        if (p.sinking && r.hy > 0) shockwave(p);
+        if (p.hook && (r.hx || r.hy)) p.hook = null;                    // the hook never pulls through stone
 
         if (p.attackT > 0) { p.attackT--; playerHits(); }
 
@@ -259,7 +301,7 @@ const Metro = (() => {
         else if (p.y > RH && R.ex.down) enter(R.ex.down.to, "down");
         else { p.x = Math.max(p.x, -p.w); if (p.y > RH + 200) { p.x = p.safe.x; p.y = p.safe.y; } }
 
-        K.jumpP = K.dashP = K.atkP = K.spP = false;
+        K.jumpP = K.dashP = K.atkP = K.spP = K.lampP = K.hookP = false;
     }
 
     function playerHits() {
@@ -294,6 +336,73 @@ const Metro = (() => {
         }
         S.shake = 6; renderRoomCache(); saveGame(); MetroFx.play("secret");
         toast("A hidden passage opens…");
+    }
+
+    /* ================================================  NEW ABILITIES  ====
+       Lantern Sight: Lumen platform under the feet + stun nearby enemies.
+       Sinking Weight: mid-air dive; the landing shockwave hurts and shatters.
+       Bell Hook: instant ray along the aim; latches to an anchor and pulls. */
+    function lanternPulse(p) {
+        p.lampCd = 90;
+        const cx = p.x + p.w / 2, cy = p.y + p.h / 2, row = Math.ceil((p.y + p.h) / TS), c0 = Math.floor(cx / TS) - 1;
+        const tiles = [];
+        if (row >= 0 && row < ROWS) for (let x = c0; x < c0 + 4; x++) if (inGrid(x, row) && R.g[row][x] === ".") { R.g[row][x] = "L"; tiles.push([x, row]); }
+        if (tiles.length) S.lumen.push({ tiles, t: 180 });
+        S.enemies.forEach(e => { if (!e.dead && e.t !== "warden" && Math.hypot(e.x + e.w / 2 - cx, e.y + e.h / 2 - cy) < 4.5 * TS) e.stun = 90; });
+        S.eshots = S.eshots.filter(s => Math.hypot(s.x + s.w / 2 - cx, s.y + s.h / 2 - cy) > 4.5 * TS);
+        burst(cx, cy, "#f6e7ae", 16); S.ring = { x: cx, y: cy, t: 0, max: 30, col: "#f6e7ae" }; MetroFx.play("lantern");
+    }
+    function shockwave(p) {
+        p.sinking = false;
+        const cx = p.x + p.w / 2, gy = p.y + p.h, tx0 = Math.floor(cx / TS), ty0 = Math.floor((gy + 2) / TS);   // +2: landing leaves feet 0.001px above the next row
+        let broke = 0;
+        for (let ty = ty0 - 5; ty <= ty0 + 1; ty++) for (let tx = tx0 - BREAK_R; tx <= tx0 + BREAK_R; tx++) {
+            if (!inGrid(tx, ty) || R.g[ty][tx] !== "B") continue;
+            R.g[ty][tx] = "."; m.broken.push(R.id + ":" + tx + "," + ty); burst(tx * TS + 16, ty * TS + 16, "#8a8f9c", 6); broke++;
+        }
+        S.enemies.forEach(e => {
+            if (!e.dead && Math.abs(e.x + e.w / 2 - cx) <= SHOCK_R * TS && Math.abs(e.y + e.h / 2 - gy) <= 1.5 * TS) damageEnemy(e, 2, e.x + e.w / 2 < cx ? -1 : 1);
+        });
+        S.shake = Math.max(S.shake, 10); S.hitstop = Math.max(S.hitstop, MetroFx.freeze(4));
+        S.ring = { x: cx, y: gy, t: 0, max: 34, col: "#cfe9ff" }; burst(cx, gy, "#cfe9ff", 16); MetroFx.play("shock");
+        if (broke) { renderRoomCache(); saveGame(); toast("The brittle stone shatters."); }
+    }
+    /* Instant ray from the chest along the aim; stone and brittle stop it, anchors catch it. */
+    function castHook(p, ax, ay) {
+        const L = Math.hypot(ax, ay), ux = ax / L, uy = ay / L, ox = p.x + p.w / 2, oy = p.y + p.h / 2 - 6;
+        for (let d = 4; d <= HOOK_RANGE; d += 4) {
+            const x = ox + ux * d, y = oy + uy * d, tx = Math.floor(x / TS), ty = Math.floor(y / TS);
+            if (!inGrid(tx, ty)) break;
+            const ch = R.g[ty][tx];
+            if (SOLID_CH.has(ch)) return { hit: "wall", x: ox + ux * (d - 4), y: oy + uy * (d - 4) };
+            if (ch === "A") return { hit: "anchor", x: tx * TS + TS / 2, y: ty * TS + TS / 2 };
+            const e = S.enemies.find(en => !en.dead && x >= en.x && x <= en.x + en.w && y >= en.y && y <= en.y + en.h);
+            if (e) return { hit: "enemy", e, x, y };
+        }
+        return { hit: "none", x: ox + ux * HOOK_RANGE, y: oy + uy * HOOK_RANGE };
+    }
+    function fireHook(p) {
+        const ax0 = (K.right ? 1 : 0) - (K.left ? 1 : 0), ay = (K.down ? 1 : 0) - (K.up ? 1 : 0);
+        const ax = (!ax0 && !ay) ? p.face : ax0;
+        const hit = castHook(p, ax, ay);
+        S.hookLine = { x1: p.x + p.w / 2, y1: p.y + p.h / 2 - 6, x2: hit.x, y2: hit.y, t: 10, hit: hit.hit };
+        p.hookCd = 18;
+        if (hit.hit === "anchor") { p.hook = { tx: hit.x, ty: hit.y, t: 70 }; p.vx = p.vy = 0; burst(hit.x, hit.y, "#c9a35a", 12); MetroFx.play("hook"); }
+        else if (hit.hit === "enemy") { damageEnemy(hit.e, 1, p.face); if (hit.e.t !== "warden") hit.e.stun = 40; burst(hit.x, hit.y, "#c9a35a", 8); MetroFx.play("hook"); }
+        else MetroFx.play("latch");
+    }
+    function hookPull(p) {
+        const h = p.hook, cx = p.x + p.w / 2, cy = p.y + p.h / 2, dx = h.tx - cx, dy = h.ty - cy, d = Math.hypot(dx, dy);
+        if (d < 10 || --h.t <= 0) { p.hook = null; p.vx *= .5; p.vy = Math.min(p.vy, -2); return; }
+        const sp = Math.min(11, d);
+        p.vx = dx / d * sp; p.vy = dy / d * sp; p.face = p.vx >= 0 ? 1 : -1;
+    }
+    function lumenTick() {
+        S.lumen = S.lumen.filter(l => {
+            if (--l.t > 0) return true;
+            l.tiles.forEach(([x, y]) => { if (R.g[y][x] === "L") R.g[y][x] = "."; });
+            return false;
+        });
     }
 
     /* =================================================  ENEMIES  ====== */
@@ -331,13 +440,14 @@ const Metro = (() => {
 
     function stepEnemy(e) {
         if (e.dead) return;
+        if (e.stun > 0) { e.stun--; return; }                              // Lantern Sight / Bell Hook stun: no AI, no contact damage
         const p = P, dx = (p.x + p.w / 2) - (e.x + e.w / 2), dy = (p.y + p.h / 2) - (e.y + e.h / 2), dist = Math.hypot(dx, dy);
         e.flash--; e.tm--;
         if (e.t === "crawler") {
             if (Math.abs(e.vx) > 1.1) e.vx *= .85; else e.vx = Math.sign(e.vx || -1) * 1;
             const r = move(e, e.vx, 0);
             const aheadX = e.x + (e.vx > 0 ? e.w + 2 : -2);
-            const ft = tileAt(Math.floor(aheadX / TS), Math.floor((e.y + e.h + 2) / TS)), floorAhead = ft === "#" || ft === "W" || ft === "=";
+            const ft = tileAt(Math.floor(aheadX / TS), Math.floor((e.y + e.h + 2) / TS)), floorAhead = SOLID_CH.has(ft) || ONEWAY_CH.has(ft);
             if (r.hx || !floorAhead) e.vx = -Math.sign(e.vx || 1) * 1;
             e.vy = Math.min(e.vy + G, 10); move(e, 0, e.vy); if (grounded(e)) e.vy = 0;
         } else if (e.t === "flyer") {
@@ -407,10 +517,15 @@ const Metro = (() => {
             const [rid, c] = k.split(":");
             if (rid !== id || typeof c !== "string") return;
             const [x, y] = c.split(",").map(Number);
-            if (!inGrid(x, y) || R.g[y][x] !== "W") return;
+            if (!inGrid(x, y) || (R.g[y][x] !== "W" && R.g[y][x] !== "B")) return;
             R.g[y][x] = ".";
         });
-        S = Object.assign(S || {}, { enemies: [], items: [], coins: [], shots: [], eshots: [], parts: S && S.parts || [], lock: false, banner: 150, t: 0, bossRoom: false, boss: null, dialog: null });
+        for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {           // owned seals are gone for good
+            const ab = SEAL_AB[R.g[y][x]];
+            if (ab && m.abilities[ab]) R.g[y][x] = ".";
+        }
+        if (P) { P.hook = null; P.sinking = false; }
+        S = Object.assign(S || {}, { enemies: [], items: [], coins: [], shots: [], eshots: [], parts: S && S.parts || [], lock: false, banner: 150, t: 0, bossRoom: false, boss: null, dialog: null, lumen: [], hookLine: null, ring: null });
         R.enemies.forEach(en => spawnEnemy(en.t, en.x, en.y));
         R.items.forEach(it => { if (!m.collected.includes(it.id)) S.items.push({ ...it, bob: Math.random() * 6 }); });
         if (R.boss) {
@@ -506,6 +621,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         S.parts = S.parts.filter(q => q.life > 0).slice(-220);
         if (S.banner > 0) S.banner--; if (S.shake > 0) S.shake *= .85; if (S.restFlash > 0) S.restFlash--;
         if (S.phaseFlash > 0) S.phaseFlash--; if (S.hudPulse > 0) S.hudPulse--; if (S.ring && ++S.ring.t > S.ring.max) S.ring = null;
+        lumenTick(); if (S.hookLine && --S.hookLine.t <= 0) S.hookLine = null;
         if (S.popup && --S.popup.t <= 0) S.popup = null; if (S.toast && --S.toast.t <= 0) S.toast = null;
         S.enemies = S.enemies.filter(e => !e.dead || e.t === "warden");
         updateCam();
@@ -530,6 +646,20 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     const pal = () => (typeof worlds !== "undefined" && worlds[R.theme]) || { sky1: "#0f1420", sky2: "#26324a", ground: "#3a4650", dirt: "#1d232b" };
     const hash = (x, y) => { let h = x * 374761393 + y * 668265263; h = (h ^ (h >> 13)) * 1274126177; return ((h ^ (h >> 16)) >>> 0) / 4294967295; };
 
+    /* Seal glyphs (silhouette first): chevrons, slashes, leaf, lantern, dive triangle, bell ring. */
+    function drawSeal(c, ch, px, py) {
+        const ab = SEAL_AB[ch], cx = px + 16, cy = py + 16;
+        c.fillStyle = "#2a2540"; c.fillRect(px, py, TS, TS);
+        c.strokeStyle = "#f2b84b"; c.fillStyle = "#f2b84b"; c.lineWidth = 2.5;
+        c.strokeRect(px + 3, py + 3, TS - 6, TS - 6);
+        c.beginPath();
+        if (ab === "dash") { c.moveTo(cx - 6, cy - 7); c.lineTo(cx, cy); c.lineTo(cx - 6, cy + 7); c.moveTo(cx + 1, cy - 7); c.lineTo(cx + 7, cy); c.lineTo(cx + 1, cy + 7); c.stroke(); }
+        else if (ab === "wall") { for (let i = -1; i <= 1; i++) { c.moveTo(cx + i * 6 - 3, cy + 8); c.lineTo(cx + i * 6 + 3, cy - 8); } c.stroke(); }
+        else if (ab === "dbl") { c.ellipse(cx, cy, 4.5, 9, Math.PI / 4, 0, 7); c.stroke(); c.beginPath(); c.moveTo(cx - 6, cy + 6); c.lineTo(cx + 6, cy - 6); c.stroke(); }
+        else if (ab === "lantern") { c.arc(cx, cy + 2, 7, 0, 7); c.stroke(); c.beginPath(); c.moveTo(cx, cy - 9); c.lineTo(cx + 3, cy - 4); c.lineTo(cx - 3, cy - 4); c.closePath(); c.fill(); }
+        else if (ab === "sink") { c.moveTo(cx - 8, cy - 6); c.lineTo(cx + 8, cy - 6); c.lineTo(cx, cy + 8); c.closePath(); c.fill(); }
+        else if (ab === "hook") { c.arc(cx, cy, 7, 0, 7); c.stroke(); c.beginPath(); c.arc(cx, cy, 2.5, 0, 7); c.fill(); }
+    }
     function renderRoomCache() {
         if (TEST) return;
         roomCache = roomCache || document.createElement("canvas"); roomCache.width = RW; roomCache.height = RH;
@@ -544,6 +674,9 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
                 else if (!solidIn(x, y - 1)) { c.fillStyle = P2.ground; c.fillRect(px, py, TS, 7); c.fillStyle = "rgba(255,255,255,.12)"; c.fillRect(px, py, TS, 2); }
                 if (!solidIn(x, y + 1) && t === "#") { c.fillStyle = "rgba(0,0,0,.35)"; c.fillRect(px, py + TS - 4, TS, 4); }
             } else if (t === "=") { c.fillStyle = P2.ground; c.fillRect(px, py, TS, 8); c.fillStyle = "rgba(255,255,255,.15)"; c.fillRect(px, py, TS, 2); c.fillStyle = "rgba(0,0,0,.4)"; c.fillRect(px + 2, py + 8, 3, 6); c.fillRect(px + TS - 5, py + 8, 3, 6); }
+            else if (t === "B") { c.fillStyle = "#3d3a46"; c.fillRect(px, py, TS, TS); c.strokeStyle = "rgba(200,230,255,.55)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(px + 4, py + 6); c.lineTo(px + 14, py + 14); c.lineTo(px + 10, py + 27); c.moveTo(px + 14, py + 14); c.lineTo(px + 28, py + 9); c.stroke(); }
+            else if (SEAL_AB[t]) drawSeal(c, t, px, py);
+            else if (t === "A") { c.strokeStyle = "#c9a35a"; c.lineWidth = 3; c.beginPath(); c.arc(px + 16, py + 14, 7, 0, 7); c.stroke(); c.fillStyle = "#c9a35a"; c.fillRect(px + 14, py + 20, 4, 6); }
             else if (t === "^") { c.fillStyle = "#cfd8e3"; for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(px + i * 8, py + TS); c.lineTo(px + i * 8 + 4, py + 6); c.lineTo(px + i * 8 + 8, py + TS); c.fill(); } }
         }
         bgCache = bgCache || [document.createElement("canvas"), document.createElement("canvas")];
@@ -572,14 +705,14 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         const shk = S.shake * MetroFx.shakeScale(); const sh = shk > .5 ? [rnd(-shk, shk), rnd(-shk, shk)] : [0, 0];
         ctx.save(); ctx.scale(scale, scale); ctx.translate(-Math.round(cam.x) + sh[0], -Math.round(cam.y) + sh[1]);
         ctx.drawImage(bgCache[0], cam.x * .6, cam.y * .6); ctx.drawImage(bgCache[1], cam.x * .3, cam.y * .3);
-        ctx.drawImage(roomCache, 0, 0);
+        ctx.drawImage(roomCache, 0, 0); drawLumen();
         if (R.bench) drawBench(R.bench.x);
         if (R.npc) drawNpc(R.npc.x);
         S.items.forEach(drawItem); S.coins.forEach(c => { ctx.fillStyle = "#cfe3f0"; ctx.beginPath(); ctx.arc(c.x + 4, c.y + 4, 4, 0, 7); ctx.fill(); });
         S.enemies.forEach(drawEnemy); drawTelegraphs();
         S.eshots.forEach(s => { ctx.fillStyle = s.ground ? "#e8edf3" : "#b8ff9a"; ctx.globalAlpha = .9; ctx.beginPath(); ctx.ellipse(s.x + s.w / 2, s.y + s.h / 2, s.w / 2, s.h / 2, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1; });
         S.shots.forEach(s => { ctx.fillStyle = "#cfe9ff"; ctx.shadowColor = "#9fd0ff"; ctx.shadowBlur = 10; ctx.fillRect(s.x, s.y, s.w, s.h); ctx.shadowBlur = 0; });
-        drawPlayer(); drawRing();
+        drawPlayer(); drawHookLine(); drawRing();
         S.parts.forEach(q => { ctx.globalAlpha = Math.min(1, q.life / 12); ctx.fillStyle = q.col; ctx.fillRect(q.x, q.y, q.s, q.s); }); ctx.globalAlpha = 1;
         ctx.restore();
         if (window.Scenery) Scenery.draw(ctx, { cameraX: cam.x * scale, world: R.theme, player: { x: (P.x - cam.x) * scale + cam.x * scale, y: (P.y - cam.y) * scale, width: P.w * scale, height: P.h * scale } });
@@ -615,6 +748,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
             ctx.fillStyle = e.phase === 2 ? "#ff8a8a" : "#cfe9ff"; ctx.fillRect(2, -26 + crouch, 8, 4);                               // eye
             if (e.phase === 2) { ctx.strokeStyle = "#cfe9ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-10, -10); ctx.lineTo(0, 4); ctx.lineTo(-6, 18); ctx.stroke(); }
         }
+        if (e.stun > 0) { ctx.fillStyle = "#f6e7ae"; for (let i = 0; i < 3; i++) { const a = S.t / 10 + i * 2.1; ctx.beginPath(); ctx.arc(Math.cos(a) * 12, -e.h / 2 - 10 + Math.sin(a) * 3, 2.2, 0, 7); ctx.fill(); } }
         ctx.restore();
     }
     /* Telegraph assist: shape cues that never depend on colour. A "!" marker
@@ -639,6 +773,24 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         });
     }
     /* Unlock / pickup ring: a gold ring that widens from Milo and fades. */
+    function drawLumen() {
+        (S.lumen || []).forEach(l => {
+            if (l.t < 60 && Math.floor(l.t / 5) % 2) return;                 // flickers in the last second
+            l.tiles.forEach(([x, y]) => {
+                const px = x * TS, py = y * TS;
+                ctx.fillStyle = "rgba(246,231,174,.4)"; ctx.fillRect(px, py, TS, 8);
+                ctx.setLineDash([4, 3]); ctx.strokeStyle = "#f6e7ae"; ctx.lineWidth = 1.5; ctx.strokeRect(px + .5, py + .5, TS - 1, 7); ctx.setLineDash([]);
+            });
+        });
+    }
+    function drawHookLine() {
+        const from = { x: P.x + P.w / 2, y: P.y + P.h / 2 - 6 };
+        const to = P.hook ? { x: P.hook.tx, y: P.hook.ty } : (S.hookLine && S.hookLine.t > 0 ? { x: S.hookLine.x2, y: S.hookLine.y2 } : null);
+        if (!to) return;
+        const good = P.hook || (S.hookLine && S.hookLine.hit === "anchor");
+        ctx.save(); ctx.strokeStyle = good ? "#f6e7ae" : "#8a7a68"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+        ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke(); ctx.restore();
+    }
     function drawRing() {
         const r = S.ring; if (!r) return;
         const k = Math.min(1, r.t / r.max), rad = 10 + k * 46;
@@ -680,11 +832,16 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
 
     /* ==================================================  MAP  ========= */
     function drawMap(c) {
-        const g = c.getContext("2d"), cw = c.width, ch = c.height, cell = Math.min(cw / 6.4, ch / 3.4), ox = cw / 2 - cell * 2.5, oy = ch / 2 - cell;
+        const g = c.getContext("2d"), cw = c.width, ch = c.height, rooms = Object.values(ROOMS);
+        const minX = Math.min(...rooms.map(r => r.gx)), maxX = Math.max(...rooms.map(r => r.gx));
+        const minY = Math.min(...rooms.map(r => r.gy)), maxY = Math.max(...rooms.map(r => r.gy));
+        const cols = maxX - minX + 1, rowsN = maxY - minY + 1;
+        const cell = Math.min(cw / (cols + .4), ch / (rowsN + .4));
+        const ox = (cw - cols * cell) / 2 - minX * cell, oy = (ch - rowsN * cell) / 2 - minY * cell;
         g.clearRect(0, 0, cw, ch); g.textAlign = "center";
         const vis = new Set(m.visited), adj = new Set();
-        Object.values(ROOMS).forEach(r => { if (vis.has(r.id)) [r.ex.left, r.ex.right, r.ex.up && r.ex.up.to, r.ex.down && r.ex.down.to].forEach(x => x && !vis.has(x) && adj.add(x)); });
-        Object.values(ROOMS).forEach(r => {
+        rooms.forEach(r => { if (vis.has(r.id)) [r.ex.left, r.ex.right, r.ex.up && r.ex.up.to, r.ex.down && r.ex.down.to].forEach(x => x && !vis.has(x) && adj.add(x)); });
+        rooms.forEach(r => {
             const x = ox + r.gx * cell, y = oy + r.gy * cell;
             if (vis.has(r.id)) {
                 g.fillStyle = r.id === R.id ? "#cfe9ff" : "#2b3753"; g.fillRect(x + 4, y + 4, cell - 8, cell - 8); g.strokeStyle = "#8d9bb0"; g.lineWidth = 2; g.strokeRect(x + 4, y + 4, cell - 8, cell - 8);
@@ -693,6 +850,14 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
                 if (r.ex.left) g.fillRect(x, y + cell / 2 - 3, 5, 6); if (r.ex.right) g.fillRect(x + cell - 5, y + cell / 2 - 3, 5, 6);
                 if (r.ex.up) g.fillRect(x + cell / 2 - 3, y, 6, 5); if (r.ex.down) g.fillRect(x + cell / 2 - 3, y + cell - 5, 6, 5);
             } else if (adj.has(r.id)) { g.setLineDash([6, 5]); g.strokeStyle = "#5b6a82"; g.strokeRect(x + 4, y + 4, cell - 8, cell - 8); g.setLineDash([]); g.fillStyle = "#5b6a82"; g.font = `${cell / 4}px Cinzel,serif`; g.fillText("?", x + cell / 2, y + cell / 2 + cell / 12); }
+        });
+        /* markers on visited rooms: gold diamond = sealed gate, brass ring = bell anchor, pale ring = ability not yet found */
+        rooms.forEach(r => {
+            if (!vis.has(r.id)) return;
+            const x = ox + r.gx * cell, y = oy + r.gy * cell, flat = [].concat(...(PRISTINE[r.id] || []));
+            if (flat.some(t => SEAL_AB[t] && !m.abilities[SEAL_AB[t]])) { g.fillStyle = "#f2b84b"; g.beginPath(); g.moveTo(x + cell - 12, y + 10); g.lineTo(x + cell - 6, y + 16); g.lineTo(x + cell - 12, y + 22); g.lineTo(x + cell - 18, y + 16); g.closePath(); g.fill(); }
+            if (flat.includes("A")) { g.strokeStyle = "#c9a35a"; g.lineWidth = 2; g.beginPath(); g.arc(x + 14, y + cell - 16, 4, 0, 7); g.stroke(); }
+            if (r.items.some(it => it.t.startsWith("ability:") && !m.collected.includes(it.id))) { g.strokeStyle = "#f6e7ae"; g.lineWidth = 2; g.beginPath(); g.arc(x + 14, y + 16, 4.5, 0, 7); g.stroke(); }
         });
     }
 
@@ -703,7 +868,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     function closePanel() { const p = document.getElementById("metro-panel"); p.classList.add("hidden"); p.innerHTML = ""; if (S) S.paused = false; }
     function openPause() {
         panel(`<div class="menu-card"><div class="eyebrow">Paused</div><h1>${R.name}</h1>
-          <p class="settings-note">Move A/D · Jump Space · Attack F/J (hold ↑/↓ to aim) · Dash Shift · Soul bolt E · Heal hold Q · Map M · Rest/Talk ↑</p>
+          <p class="settings-note">Move A/D · Jump Space · Attack F/J (hold ↑/↓ to aim) · Dash Shift · Lantern R · Bell Hook G · Dive Down + Jump in air · Soul bolt E · Heal hold Q · Map M · Rest/Talk ↑</p>
           <div class="account-actions"><button class="game-button primary" id="mp-res">Resume</button><button class="game-button" id="mp-map">🗺 Map</button><button class="game-button" id="mp-ch">Charms (at benches)</button><button class="game-button" id="mp-opt">⚙ Options</button><button class="game-button" id="mp-exit">Exit to Home</button></div></div>`, p => {
             p.querySelector("#mp-res").onclick = closePanel; p.querySelector("#mp-map").onclick = openMap; p.querySelector("#mp-ch").onclick = openCharms; p.querySelector("#mp-opt").onclick = openOptions;
             p.querySelector("#mp-exit").onclick = () => { stop(); showHome(); };
@@ -714,7 +879,8 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     }
     function openMap() {
         panel(`<div class="menu-card" style="width:min(820px,100%)"><div class="eyebrow">Map</div><canvas id="metro-map" width="760" height="380" style="width:100%"></canvas>
-          <p class="settings-note">Abilities ${Object.values(m.abilities).filter(Boolean).length}/3 · Items ${m.collected.length}/${Object.values(ROOMS).reduce((n, r) => n + r.items.length, 0) + 1} · Rooms ${m.visited.length}/${Object.keys(ROOMS).length}</p>
+          <p class="settings-note">Abilities ${Object.values(m.abilities).filter(Boolean).length}/${ABIL_KEYS.length} · Items ${m.collected.length}/${Object.values(ROOMS).reduce((n, r) => n + r.items.length, 0) + 1} · Rooms ${m.visited.length}/${Object.keys(ROOMS).length}</p>
+          <p class="settings-note">◆ sealed gate · ◎ bell anchor · ○ ability not yet found</p>
           <button class="game-button" id="mm-close">Close (M)</button></div>`, p => { drawMap(p.querySelector("#metro-map")); p.querySelector("#mm-close").onclick = closePanel; });
     }
     function openCharms() {
@@ -732,7 +898,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
 
     /* =================================================  INPUT  ======== */
     const KEYS = { ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right", ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S: "down",
-                   " ": "jump", z: "jump", Z: "jump", f: "atk", F: "atk", j: "atk", J: "atk", x: "atk", Shift: "dash", l: "dash", L: "dash", e: "sp", E: "sp", q: "heal", Q: "heal", h: "heal", H: "heal" };
+                   " ": "jump", z: "jump", Z: "jump", f: "atk", F: "atk", j: "atk", J: "atk", x: "atk", Shift: "dash", l: "dash", L: "dash", e: "sp", E: "sp", q: "heal", Q: "heal", h: "heal", H: "heal", r: "lamp", R: "lamp", g: "hook", G: "hook" };
     function onKey(ev, down) {
         if (!running || !S) return;
         if (down && !ev.repeat) {
@@ -742,8 +908,9 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         }
         if (S.paused) return;
         const k = KEYS[ev.key]; if (!k) return;
+        if ((ev.ctrlKey || ev.metaKey) && (k === "lamp" || k === "hook")) return;      // keep Ctrl+R (reload) working
         ev.preventDefault();
-        if (down) { if (!ev.repeat) { if (k === "jump") K.jumpP = true; if (k === "atk") K.atkP = true; if (k === "dash") K.dashP = true; if (k === "sp") K.spP = true; if (k === "up") K.upP = true; } }
+        if (down) { if (!ev.repeat) { if (k === "jump") K.jumpP = true; if (k === "atk") K.atkP = true; if (k === "dash") K.dashP = true; if (k === "sp") K.spP = true; if (k === "up") K.upP = true; if (k === "lamp") K.lampP = true; if (k === "hook") K.hookP = true; } }
         K[k] = down;
     }
     const kd = e => onKey(e, true), ku = e => onKey(e, false);
@@ -777,7 +944,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
             b.addEventListener("contextmenu", e => e.preventDefault());
             t.appendChild(b);
         };
-        btn("l", "◀", "left"); btn("r", "▶", "right"); btn("j", "⤒", "jump", "jumpP"); btn("a", "⚔", "atk", "atkP"); btn("d", "≫", "dash", "dashP"); btn("s", "✦", "sp", "spP"); btn("u", "↑", "up", "upP"); btn("h", "♥", "heal");
+        btn("l", "◀", "left"); btn("r", "▶", "right"); btn("j", "⤒", "jump", "jumpP"); btn("a", "⚔", "atk", "atkP"); btn("d", "≫", "dash", "dashP"); btn("s", "✦", "sp", "spP"); btn("u", "↑", "up", "upP"); btn("h", "♥", "heal"); btn("p", "✺", "lamp", "lampP"); btn("g", "⟲", "hook", "hookP"); btn("dn", "▼", "down");
         if ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0) t.classList.remove("hidden");
     }
 
@@ -834,9 +1001,10 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     /* test hooks (used by tests/metro.test.js; harmless in the browser) */
     const _test = {
         ROOMS, TS, COLS, ROWS, RW, RH,
-        init(abilities) { ensure(); Object.assign(m.abilities, abilities || {}); S = { parts: [], shake: 0, hitstop: 0, paused: false, dead: 0 }; P = newPlayer(); return { m, P }; },
+        init(abilities) { ensure(); Object.assign(m.abilities, abilities || {}); S = { parts: [], shake: 0, hitstop: 0, paused: false, dead: 0, lumen: [] }; P = newPlayer(); return { m, P }; },
         load(id, x, y) { loadRoom(id, { x, y }); P.hp = m.hpMax; return P; },
-        step(keys) { Object.assign(K, { left: 0, right: 0, up: 0, down: 0, jump: 0, heal: 0, jumpP: 0, atkP: 0, dashP: 0, spP: 0, upP: 0 }, keys || {}); step(); return P; },
+        SEAL_AB, SOLID_CH, ONEWAY_CH, ABIL_KEYS, HOOK_RANGE,
+        step(keys) { Object.assign(K, { left: 0, right: 0, up: 0, down: 0, jump: 0, heal: 0, jumpP: 0, atkP: 0, dashP: 0, spP: 0, upP: 0, lampP: 0, hookP: 0 }, keys || {}); step(); return P; },
         get P() { return P; }, get S() { return S; }, get R() { return R; }, grounded: () => grounded(P)
     };
     return { start, stop, _test };

@@ -190,6 +190,7 @@ const MetroFx = (() => {
         phase:   (c, d, t) => { tone(c, d, t, 110, 55, .7, "sawtooth", .2); noise(c, d, t, .5, .2, 400, 90, .8); },
         death:   (c, d, t) => tone(c, d, t, 200, 40, .9, "sawtooth", .2),
         bigdeath:(c, d, t) => { tone(c, d, t, 140, 30, 1.2, "sawtooth", .25); noise(c, d, t, .8, .18, 300, 60, .7); },
+        dive:    (c, d, t) => tone(c, d, t, 700, 120, .25, "triangle", .12),
         hook:    (c, d, t) => tone(c, d, t, 600, 1500, .14, "sawtooth", .12),
         latch:   (c, d, t) => tone(c, d, t, 1000, 1000, .05, "square", .1),
         click:   (c, d, t) => tone(c, d, t, 150, 150, .04, "square", .08),
