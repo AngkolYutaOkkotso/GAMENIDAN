@@ -484,8 +484,8 @@ Each stage ends with a passing `node tests/metro.test.js`, a commit, and a push 
 | Stage | Scope | Files | Status |
 |---|---|---|---|
 | 0 | This design plan | `docs/DESIGN.md`, `README.md` (link) | this turn |
-| 1 | Descent options (shake, flash, hit-stop, telegraph assist, reduced downtime, SFX and ambient volume), SFX + unlock feedback, touch Heal button, Settings and Pause UI | new `js/metroFx.js`; `js/metroid.js`; `index.html`; `sw.js`; `tests/metro.test.js` | this turn |
-| 2 | Lantern Sight (R), Sinking Weight, Bell Hook (G), seal gates, brittle floor, Bellwork Ravine r8–r10, map glyphs, save keys, tests | `js/metroid.js`; `tests/metro.test.js`; README | this turn (if time) |
+| 1 | Descent options (shake, flash, hit-stop, telegraph assist, reduced downtime, SFX and ambient volume), SFX + unlock feedback, touch Heal button, Settings and Pause UI — **done** (commit `a82ebe9`) | new `js/metroFx.js`; `js/metroid.js`; `index.html`; `sw.js`; `tests/metro.test.js` | this turn |
+| 2 | Lantern Sight (R), Sinking Weight, Bell Hook (G), seal gates, brittle floor, Bellwork Ravine r8–r10, map glyphs, save keys, tests — **done** (commit `f04349b`) | `js/metroid.js`; `tests/metro.test.js`; README | done |
 | 3 | Boss framework refactor (`BOSSES` table with step/phase hooks), Tollkeeper (R4), telegraph shapes | `js/metroid.js`; tests | next |
 | 4 | Remaining Z2/Z3/Z4/Z5/Z8 bosses and rooms; Ribkeeper, Matron, Mirror Wick | `js/metroid.js` | later |
 | 5 | Zones Z9–Z11, water/fire/beat mechanics | `js/metroid.js`, `js/metroFx.js` | later |

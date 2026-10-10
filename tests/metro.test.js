@@ -239,6 +239,20 @@ ok(shaft(false) === false, "r4: without wall jump the shaft is unreachable");
   };
   ok(ledge({ dbl: true }) === true, "r8: Moth Wing reaches the Bellwork ledge");
   ok(ledge({}) === false, "r8: without Moth Wing the ledge is out of reach");
+  const climb = ab => {                                        // wall-jump up the column face to the ledge
+    fresh(ab); T.load("r8", 18 * TS, 22 * TS - 31); T.S.enemies.length = 0;
+    let last = 1, reached = false;
+    for (let f = 0; f < 900 && !reached; f++) {
+      const p = T.P; if (p.onGround && Math.abs(p.y + p.h - 16 * TS) < 3) reached = true;
+      const c = {};
+      if (p.onGround) { c.right = 1; c.jumpP = 1; c.jump = 1; last = 1; }
+      else if (p.wallDir) { c.jumpP = 1; c.jump = 1; c[p.wallDir > 0 ? "left" : "right"] = 1; last = -p.wallDir; }
+      else { c.jump = 1; c[last > 0 ? "right" : "left"] = 1; }
+      T.step(c);
+    }
+    return reached;
+  };
+  ok(climb({ wall: true }) === true, "r8: Wall Claw climbs the brittle column face to the ledge (the second route)");
 
   // Bell Hook: aims along a ray, latches to the anchor, pulls up; jump lets go
   const hookRun = ab => {
