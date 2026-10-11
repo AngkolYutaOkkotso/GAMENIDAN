@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hollow Milo — Art Kit preview</title>
+<style>
+  :root{
+    --ink:#0b0e16; --gold:#f2b84b; --white:#e8edf3; --soul:#8fc1e3; --danger:#ff6b6b;
+    --panel:rgba(14,18,28,.72); --line:rgba(232,237,243,.14);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:#080a11;color:var(--white);
+    font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  header{
+    position:sticky;top:0;z-index:5;padding:16px 22px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+    background:rgba(8,10,17,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+  }
+  h1{font:700 20px/1.2 Cinzel,Georgia,serif;margin:0;letter-spacing:.06em}
+  .sub{color:#8d9bb0;font-size:13px}
+  .spacer{flex:1}
+  button{
+    font:600 13px/1 Inter,system-ui,sans-serif;color:var(--white);background:#182034;
+    border:1px solid var(--line);border-radius:6px;padding:9px 12px;cursor:pointer;
+  }
+  button:hover{filter:brightness(1.15)}
+  button[aria-pressed="true"]{background:#2b2416;border-color:var(--gold);color:var(--gold)}
+  button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  main{padding:18px 22px 60px;display:flex;flex-direction:column;gap:22px}
+  section{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px}
+  h2{font:700 15px/1.2 Cinzel,Georgia,serif;margin:0 0 4px;letter-spacing:.05em}
+  p.note{margin:0 0 12px;color:#8d9bb0;font-size:13px;max-width:78ch}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+  .cell{background:#0d1220;border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}
+  .cell canvas{display:block;width:100%;height:auto;image-rendering:auto}
+  .cell b{display:block;font-size:12.5px;margin-top:6px}
+  .cell i{display:block;font-style:normal;font-size:11.5px;color:#8d9bb0}
+  .role{color:var(--gold)}
+  .swatches{display:flex;flex-wrap:wrap;gap:10px}
+  .sw{width:110px}
+  .sw div{height:44px;border-radius:8px;border:1px solid rgba(0,0,0,.4)}
+  .sw span{display:block;font-size:11px;color:#8d9bb0;margin-top:4px}
+  .scale-row{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end}
+  .legend{font-size:12.5px;color:#8d9bb0}
+  code{background:#141b2b;border-radius:4px;padding:1px 5px;font-size:12.5px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Art Kit preview</h1>
+    <div class="sub">Every silhouette is drawn by <code>js/art.js</code> — exactly what the game draws, with no CSS filters.</div>
+  </div>
+  <div class="spacer"></div>
+  <button id="sil" aria-pressed="false" title="Fill every creature with solid black: if the shape is still readable, it passes the silhouette test.">Black silhouette test</button>
+  <button id="zoom" aria-pressed="true">Zoom ×3</button>
+  <button id="dark" aria-pressed="true">Apply zone darkness</button>
+  <button id="motion" aria-pressed="true">Animate</button>
+</header>
+
+<main>
+  <section>
+    <h2>Player — Milo, the Lantern Vessel</h2>
+    <p class="note">
+      One renderer for both modes. Left to right: idle, walking, dash, airborne (rising), landing squash, attack, hurt.
+      The lantern is always forward (facing), the cap overhangs the face, the cloak tapers to a split hem.
+      Bottom row: the same Vessel on each zone ground with that zone's darkness applied.
+    </p>
+    <div id="vessel-states" class="grid"></div>
+  </section>
+
+  <section>
+    <h2>Vessels — all ten, on the darkest zone ground</h2>
+    <p class="note">Cap = hero colour, cloak = secondary, lantern and rim light are always gold, so every Vessel keeps a shared identity.</p>
+    <div id="vessels" class="grid"></div>
+  </section>
+
+  <section>
+    <h2>Mobs — role silhouettes (Levels roster)</h2>
+    <p class="note" id="mob-note"></p>
+    <div id="mobs" class="grid"></div>
+  </section>
+
+  <section>
+    <h2>Mobs — The Hollow Descent</h2>
+    <p class="note">Crawler, flyer, spitter, and the Hollow Warden (phase 1 and phase 2, with cracks and a hot eye).</p>
+    <div id="metro" class="grid"></div>
+  </section>
+
+  <section>
+    <h2>Zone props (living detail)</h2>
+    <p class="note">Deterministic, one tile tall, always placed on a surface: they add motion to the world without ever hiding a hazard, platform or attack.</p>
+    <div id="props" class="grid"></div>
+  </section>
+
+  <section>
+    <h2>Palette and rules</h2>
+    <p class="note">
+      Reserved: gold = light, rewards, lantern · coral = danger and enemy attacks (always with a shape cue) ·
+      soul blue = currency and soul · ink = the 2 px outline on every creature.
+    </p>
+    <div class="swatches" id="swatches"></div>
+    <p class="note legend" id="rules"></p>
+  </section>
+</main>
+
+<script src="../js/art.js"></script>
+<script>
+(function () {
+  const opts = { sil: false, zoom: true, dark: true, motion: true };
+  const reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* Zone backgrounds: the same `worlds` palette the game uses, plus the
+     Scenery darkness value so we test the art as it is actually seen. */
+  const ZONES = [
+    { name: "Forgotten Crossroads", ground: "#1d232b", sky: "#1a2230", dark: .35 },
+    { name: "Mossy Greenpath",      ground: "#1a2a1f", sky: "#0f2a24", dark: .45 },
+    { name: "Crystal Depths",       ground: "#272a45", sky: "#1b1840", dark: .55 },
+    { name: "City of Rain",         ground: "#38424f", sky: "#1a2438", dark: .35 },
+    { name: "Ashen Basin",          ground: "#21130f", sky: "#1c0f12", dark: .45 },
+    { name: "Pale Peaks",           ground: "#5a7384", sky: "#2a3d52", dark: .25 },
+    { name: "Hollow Castle",        ground: "#15131d", sky: "#0b0a14", dark: .62 }
+  ];
+
+  const HEROES = [
+    { id: "milo",  color: "#d94f65", secondary: "#8f2940", name: "Milo" },
+    { id: "luna",  color: "#8f6ee8", secondary: "#5540a6", name: "Pale Luna" },
+    { id: "rocco", color: "#9b6948", secondary: "#5b3828", name: "Stone Rocco" },
+    { id: "zuki",  color: "#55b85c", secondary: "#28723a", name: "Moss Zuki" },
+    { id: "blaze", color: "#ed6638", secondary: "#a92d20", name: "Ember Blaze" },
+    { id: "taro",  color: "#54bce5", secondary: "#267ba5", name: "Frost Taro" },
+    { id: "koko",  color: "#e7b83c", secondary: "#9b6b1e", name: "Geo Koko" },
+    { id: "piko",  color: "#478de0", secondary: "#25549b", name: "Tide Piko" },
+    { id: "mimi",  color: "#ed80aa", secondary: "#a93d68", name: "Soul Mimi" },
+    { id: "bruno", color: "#a56d46", secondary: "#583521", name: "Void Bruno" }
+  ];
+
+  const LEVEL_MOBS = ["slime", "beetle", "mushling", "wolf", "thorn", "forestSpirit", "bat", "rockCrawler",
+    "crystalBug", "cloudSpirit", "stormBird", "skyEye", "lavaSlime", "fireBat", "magmaBeast", "iceWolf",
+    "frostBat", "iceGolem", "darkMushroom", "knight", "magicGuardian"];
+  const METRO_MOBS = ["crawler", "flyer", "spitter", "warden"];
+
+  /* --- canvas helper: one animation loop for the whole page --- */
+  const cells = [];
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+
+  function cell(host, label, sub, w, h, painter) {
+    const box = document.createElement("div"); box.className = "cell";
+    const cv = document.createElement("canvas");
+    const z = opts.zoom ? 3 : 1;
+    cv.width = w * z * dpr; cv.height = h * z * dpr;
+    cv.style.width = (w * z) + "px"; cv.style.height = (h * z) + "px";
+    const c = cv.getContext("2d");
+    c.scale(z * dpr, z * dpr);
+    box.appendChild(cv);
+    const b = document.createElement("b"); b.textContent = label; box.appendChild(b);
+    if (sub) { const i = document.createElement("i"); i.innerHTML = sub; box.appendChild(i); }
+    host.appendChild(box);
+    cells.push({ c, cv, w, h, painter });
+    return box;
+  }
+
+  /* Silhouette test: everything is filled with one flat colour, so only the
+     shape is left. Implemented by overriding the fill/stroke setters. */
+  function silhouette(ctx, on) {
+    if (!on) return ctx;
+    return new Proxy(ctx, {
+      set(t, p, v) {
+        if (p === "fillStyle" || p === "strokeStyle") v = "#05070c";
+        if (p === "globalAlpha") return true;
+        t[p] = v; return true;
+      }
+    });
+  }
+
+  function clear(c, w, h, bg) {
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = bg || "#0d1220"; c.fillRect(0, 0, c.canvas.width, c.canvas.height);
+    c.restore();
+  }
+
+  /* --- 1. the Vessel in each animation state --- */
+  const vhost = document.getElementById("vessel-states");
+  const STATES = [
+    ["idle", {}],
+    ["walking", { walk: 2.4, air: false }],
+    ["dash", { dash: 1, walk: 2.4 }],
+    ["airborne", { air: true, vy: -9 }],
+    ["landing", { squash: .26 }],
+    ["attack", { attack: 1, walk: 1.2 }],
+    ["hurt", { hurt: 1 }]
+  ];
+  STATES.forEach(([name, st]) => cell(vhost, name, "", 100, 96, (c, t) => {
+    c.save(); c.translate(50, 84);
+    const s = Object.assign({ x: 0, y: 0, w: 44, h: 64, hero: HEROES[0], face: 1, t: (t * 1.6) % 10000, blink: (t % 190) < 5 }, st);
+    Art.drawVessel(silhouette(c, opts.sil), s);
+    c.restore();
+  }));
+
+  /* --- 2. all Vessels on the darkest ground, with darkness --- */
+  const whost = document.getElementById("vessels");
+  HEROES.forEach(h => cell(whost, h.name, 'cape <span class="role">' + h.color + "</span>", 120, 104, (c, t) => {
+    zoneBackdrop(c, 0, 0, 120, 104, ZONES[6]);
+    c.save(); c.translate(60, 96);
+    const s = { x: 0, y: 0, w: 44, h: 64, hero: h, face: 1, t: t * 1.6, walk: 1.6, blink: (t % 200) < 4 };
+    Art.drawVessel(silhouette(c, opts.sil), s);
+    c.restore();
+    if (opts.dark) darkness(c, 120, 104, 60, 70, ZONES[6].dark);
+  }));
+
+  /* --- 3. mobs --- */
+  const mobNote = document.getElementById("mob-note");
+  mobNote.innerHTML = Object.entries(Art.MOBS).filter(([k]) => LEVEL_MOBS.includes(k))
+    .map(([k, v]) => "<code>" + k + "</code> <span class='role'>" + v.role + "</span>/" + v.fam).join(" · ");
+
+  function mobCell(host, type, w, h, extra, zone) {
+    const info = Art.mobInfo(type);
+    const z = zone || ZONES[0];
+    cell(host, type, "<span class='role'>" + info.role + "</span> · " + info.fam, w + 24, h + 26,
+      (c, t, phase) => {
+        zoneBackdrop(c, 0, 0, w + 24, h + 26, z);
+        c.save(); c.translate(12, h + 20);
+        Art.drawMob(silhouette(c, opts.sil), type, Object.assign({
+          x: 0, y: 0, feet: 0, w: w, h: h, face: 1,
+          t: t * 1.5, walk: t * .12, alert: true, ground: true
+        }, extra || {}));
+        c.restore();
+        if (opts.dark) darkness(c, w + 24, h + 26, (w + 24) / 2, h + 8, z.dark);
+      });
+  }
+  const mhost = document.getElementById("mobs");
+  LEVEL_MOBS.forEach(t => {
+    const w = ({ magmaBeast: 58, iceGolem: 60, knight: 52 }[t]) || 46;
+    const h = ({ magmaBeast: 58, iceGolem: 60, knight: 60 }[t]) || 46;
+    mobCell(mhost, t, w, h, {}, ZONES[Math.min(6, Math.floor(LEVEL_MOBS.indexOf(t) / 3))]);
+  });
+  const dhost = document.getElementById("metro");
+  mobCell(dhost, "crawler", 26, 20, {}, ZONES[0]);
+  mobCell(dhost, "flyer", 24, 20, { ground: false }, ZONES[0]);
+  mobCell(dhost, "spitter", 28, 26, {}, ZONES[1]);
+  mobCell(dhost, "warden", 46, 64, { windup: .6 }, ZONES[6]);
+  mobCell(dhost, "warden", 46, 64, { phase2: 1 }, ZONES[6]);
+
+  /* --- 4. props --- */
+  const phost = document.getElementById("props");
+  const KIND_ZONE = { grass: 1, mushroom: 1, spore: 1, reed: 4, pebble: 0, crystal: 2, ice: 5, chain: 3, rib: 6 };
+  Object.keys(Art.PROPS).forEach(kind => {
+    const z = ZONES[KIND_ZONE[kind] !== undefined ? KIND_ZONE[kind] : 0];
+    cell(phost, kind, "", 84, 66, (c, t) => {
+      zoneBackdrop(c, 0, 0, 84, 66, z);
+      c.save(); c.translate(0, 14);
+      Art.prop(c, kind, 42, 44, 3.2, t * 1.5, KIND_ZONE[kind] || 0);
+      c.restore();
+      if (opts.dark) darkness(c, 84, 66, 42, 44, z.dark);
+    });
+  });
+
+  /* --- 5. palette --- */
+  const sw = document.getElementById("swatches");
+  const S = Art.STYLE;
+  [["Lamplight gold", S.GOLD], ["Warm rim", S.RIM], ["Hollow white", S.WHITE], ["Soul blue", S.SOUL],
+   ["Danger coral", S.DANGER], ["Ink outline", S.INK], ["Vessel cream", S.CREAM], ["Brass", S.BRASS],
+   ["Eye calm", S.EYE_CALM], ["Eye hot", S.EYE_HOT]]
+    .forEach(([n, col]) => {
+      const d = document.createElement("div"); d.className = "sw";
+      d.innerHTML = '<div style="background:' + col + '"></div><span>' + n + "<br>" + col + "</span>";
+      sw.appendChild(d);
+    });
+  document.getElementById("rules").innerHTML =
+    "Outline 2 px ink on creatures, 1 px on props, none on tiles · shading is two-tone plus one rim stroke · " +
+    "nothing finer than 3 px · glow has three sizes only (item 16, lantern 12, telegraph 8) · " +
+    "idle cycles 40–80 frames, boss tells \u2265 24 frames, mob tells \u2265 8 frames · " +
+    "no effect ever covers a platform, hazard or attack telegraph.";
+
+  /* --- backdrop helpers --- */
+  function zoneBackdrop(c, x, y, w, h, zone) {
+    const g = c.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, zone.sky); g.addColorStop(1, zone.ground);
+    c.fillStyle = g; c.fillRect(x, y, w, h);
+    c.fillStyle = "rgba(255,255,255,.06)"; c.fillRect(x, y + h - 14, w, 2);
+  }
+  /* Scenery's darkness pass, reproduced so contrast is judged as seen in game. */
+  function darkness(c, w, h, px, py, amount) {
+    if (!amount) return;
+    const R = Math.max(w, h) * .9;
+    const g = c.createRadialGradient(px, py, 30, px, py, R);
+    g.addColorStop(0, "rgba(5,8,20," + (amount * .35) + ")");
+    g.addColorStop(1, "rgba(5,8,20," + amount + ")");
+    c.save(); c.fillStyle = g; c.fillRect(0, 0, w, h); c.restore();
+  }
+
+  /* --- animation loop --- */
+  let frame = 0;
+  function tick() {
+    frame++;
+    for (const cl of cells) {
+      const c = cl.c, z = opts.zoom ? 3 : 1;
+      c.save(); c.setTransform(z * dpr, 0, 0, z * dpr, 0, 0);
+      clear(c, cl.w, cl.h);
+      cl.painter(c, opts.motion && !reduce ? frame : 0, frame);
+      c.restore();
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  /* --- controls --- */
+  const bind = (id, key) => {
+    const b = document.getElementById(id);
+    b.addEventListener("click", () => {
+      opts[key] = !opts[key];
+      b.setAttribute("aria-pressed", String(opts[key]));
+      if (key === "zoom") location.reload();     // canvases are sized at creation
+    });
+  };
+  bind("sil", "sil"); bind("zoom", "zoom"); bind("dark", "dark"); bind("motion", "motion");
+})();
+</script>
+</body>
+</html>

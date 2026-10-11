@@ -477,6 +477,13 @@ Plus: no colour-only information (shapes and icons carry danger and item meaning
 
 ---
 
+## 6.6 Presentation, character and mob art
+The visual side of this plan - character design, mob silhouettes and roles, animation, VFX,
+camera/feedback, world life, UI readability and the accessibility matrix - is specified and
+tracked in **`docs/ART_DIRECTION.md`** (audit, style guide, staged art plan and its own test
+checklist). New rooms and bosses must follow the Art Kit in `js/art.js`: role-based silhouette
+families, the locked palette, shape-coded tells, and no colour-only information.
+
 ## 7. Staged implementation plan
 
 Each stage ends with a passing `node tests/metro.test.js`, a commit, and a push to `arena/b571fec1-gamenidan`.
@@ -491,6 +498,7 @@ Each stage ends with a passing `node tests/metro.test.js`, a commit, and a push 
 | 5 | Zones Z9–Z11, water/fire/beat mechanics | `js/metroid.js`, `js/metroFx.js` | later |
 | 6 | Endgame Z12, final bosses, credits, balance pass | all | later |
 | 7 | Performance + polish pass; mobile test | all | later |
+| A | Character / mob / animation / VFX art pass (`docs/ART_DIRECTION.md`) — Art Kit, shared Vessel renderer, nine mob families, feedback bus in both modes, HUD states, art tests | `js/art.js`, `js/game.js`, `js/metroid.js`, `style.css`, `preview/art.html`, tests | **done** |
 
 Files and systems that change:
 - `js/metroid.js` — `ROOMS` data, `ensure()` save normalisation, physics (`solid`, one-way, brittle), player abilities, boss step, render, HUD, input keys, touch buttons, panels.

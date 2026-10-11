@@ -604,3 +604,55 @@ h1,h2,.game-title,.eyebrow,.game-button,.back-button,.level-button{font-family:"
 @media(prefers-reduced-motion:reduce){
   .loading-title span,.threshold-panel>*{opacity:1}
 }
+
+
+/* =========================================================
+   HUD FEEDBACK (see docs/ART_DIRECTION.md section 8)
+   Damage shakes the HUD and pulses the health pill; picks flash the coin
+   pill; low health keeps a slow pulse so the state reads without colour.
+   Every animation is disabled by prefers-reduced-motion.
+   ========================================================= */
+
+.game-hud.hud-hit{animation:hud-hit .34s cubic-bezier(.2,.8,.3,1) 1}
+.game-hud.hud-hit .hud-pill:first-of-type,
+.game-hud.hud-hit .hud-group{animation:hud-pill-hit .34s ease 1}
+.game-hud.hud-coin .hud-pill:last-of-type,
+.game-hud.hud-coin .hud-button{animation:hud-coin .4s ease 1}
+
+.hud-pill.hud-pip-low{
+  color:#ffd9a8;
+  border-color:rgba(255,138,138,.75);
+  animation:hud-low 2.2s ease-in-out infinite;
+}
+
+@keyframes hud-hit{
+  0%{transform:translate(0,0)}
+  20%{transform:translate(-5px,2px)}
+  45%{transform:translate(4px,-2px)}
+  70%{transform:translate(-2px,1px)}
+  100%{transform:translate(0,0)}
+}
+@keyframes hud-pill-hit{
+  0%{box-shadow:0 0 0 0 rgba(255,90,90,.55)}
+  60%{box-shadow:0 0 0 10px rgba(255,90,90,0)}
+  100%{box-shadow:0 0 0 0 rgba(255,90,90,0)}
+}
+@keyframes hud-coin{
+  0%{transform:scale(1)}
+  35%{transform:scale(1.16);filter:brightness(1.35)}
+  100%{transform:scale(1)}
+}
+@keyframes hud-low{
+  0%,100%{opacity:1}
+  50%{opacity:.62}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .game-hud.hud-hit,
+  .game-hud.hud-hit .hud-pill:first-of-type,
+  .game-hud.hud-hit .hud-group,
+  .game-hud.hud-coin .hud-pill:last-of-type,
+  .game-hud.hud-coin .hud-button,
+  .hud-pill.hud-pip-low{animation:none !important}
+  .health-fill{transition:none}
+}
