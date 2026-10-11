@@ -22,6 +22,8 @@
   <script src="js/art.js" defer></script>
   <script src="js/metroFx.js" defer></script>
   <script src="js/metroid.js" defer></script>
+  <!-- one navigation model for every menu (keyboard / mouse / gamepad) -->
+  <script src="js/menuNav.js" defer></script>
   <script src="js/game.js" defer></script>
 </head>
 <body>
@@ -30,7 +32,9 @@
   </noscript>
 
   <main id="app">
-    <!-- Shared SVG symbols for the loading + login screens (Milo's silhouette, the Google mark). -->
+    <!-- Shared SVG symbols: Milo's glyph, the Google mark, and the menu icon set.
+         Every icon is drawn in one style (24×24, currentColor) so menus, the HUD
+         and buttons all speak the same visual language. -->
     <svg class="svg-defs" aria-hidden="true" focusable="false">
       <defs>
         <radialGradient id="soul-core" cx="50%" cy="50%" r="50%">
@@ -65,6 +69,22 @@
           <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
           <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/>
         </symbol>
+        <!-- menu / HUD icon set: 24×24, stroke = currentColor -->
+        <symbol id="icon-play" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M8 5.5v13l11-6.5z"/></symbol>
+        <symbol id="icon-wish" viewBox="0 0 24 24"><rect x="9" y="10.5" width="6" height="9.5" rx="1.6"/><path d="M12 3.5c1.7 1.7 2.5 3 2.5 4.2a2.5 2.5 0 0 1-5 0c0-1.2.8-2.5 2.5-4.2z"/></symbol>
+        <symbol id="icon-vessel" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M5 20.5c1.2-4.2 3.8-6.3 7-6.3s5.8 2.1 7 6.3"/></symbol>
+        <symbol id="icon-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.2v2.3M12 18.5v2.3M3.2 12h2.3M18.5 12h2.3M5.9 5.9l1.6 1.6M16.5 16.5l1.6 1.6M18.1 5.9l-1.6 1.6M7.5 16.5l-1.6 1.6"/></symbol>
+        <symbol id="icon-pad" viewBox="0 0 24 24"><rect x="2.8" y="7.5" width="18.4" height="11" rx="3.6"/><path d="M7 11v4M5 13h4"/><circle cx="16" cy="12" r="1.1"/><circle cx="18.6" cy="14.3" r="1.1"/></symbol>
+        <symbol id="icon-scroll" viewBox="0 0 24 24"><path d="M8 4h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8"/><path d="M8 4a2 2 0 0 0-2 2v2h2M8 20a2 2 0 0 0 2-2v-2H8"/><path d="M11 9h5M11 13h5"/></symbol>
+        <symbol id="icon-exit" viewBox="0 0 24 24"><path d="M13.5 4H17a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3.5"/><path d="M10 8l-4 4 4 4M6 12h9"/></symbol>
+        <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+        <symbol id="icon-map" viewBox="0 0 24 24"><path d="M9 5 4 7v12l5-2 6 2 5-2V5l-5 2-6-2z"/><path d="M9 5v12M15 7v12"/></symbol>
+        <symbol id="icon-flag" viewBox="0 0 24 24"><path d="M7 21V4"/><path d="M7 5h9l-2.3 3L16 11H7z"/></symbol>
+        <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="6" y="11" width="12" height="9" rx="2"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+        <symbol id="icon-heart" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-9.5A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.5C19 15.6 12 20 12 20z"/></symbol>
+        <symbol id="icon-geo" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 3l6 6-6 12L6 9z"/></symbol>
+        <symbol id="icon-ladder" viewBox="0 0 24 24"><path d="M8 4v16M16 4v16M8 8h8M8 12h8M8 16h8"/></symbol>
+        <symbol id="icon-back" viewBox="0 0 24 24"><path d="M11 6l-6 6 6 6"/><path d="M5 12h14"/></symbol>
       </defs>
     </svg>
 
@@ -212,38 +232,121 @@
       </div>
     </section>
 
-    <section id="home-screen" class="screen hidden menu-screen">
-      <div class="menu-card hero-panel">
-        <div class="eyebrow">A forgotten kingdom awaits</div>
-        <h1 class="game-title">Hollow Milo</h1>
-        <p class="subtitle">Descend through seven forgotten realms, fell their guardians, gather Geo, and awaken new vessels at the shrine.</p>
+    <!-- ============================ MAIN MENU ============================
+         Hierarchy: Play (primary) → journey (Wish / Vessels) → system
+         (Settings / Controls / Credits / Quit). Keyboard, mouse and gamepad
+         all drive the same highlighted button (js/menuNav.js). -->
+    <section id="home-screen" class="screen hidden menu-screen home-screen">
+      <canvas class="veil-canvas" data-veil="home" aria-hidden="true"></canvas>
+      <div class="menu-fog fog-a" aria-hidden="true"></div>
+      <div class="menu-fog fog-b" aria-hidden="true"></div>
+      <div class="home-vignette" aria-hidden="true"></div>
 
-        <div class="home-stats">
-          <span>◈ <b id="home-coins">0</b></span>
-          <span>Vessel: <b id="current-hero">Milo</b></span>
-          <span id="account-chip" role="button" tabindex="0" onclick="openAccount()" onkeydown="if(event.key==='Enter')openAccount()" style="cursor:pointer">👤 Guest</span>
+      <div class="home-stage">
+        <header class="menu-brand">
+          <div class="eyebrow brand-eyebrow-line">✦ A forgotten kingdom awaits ✦</div>
+          <h1 class="game-title home-title" aria-label="Hollow Milo">
+            <span style="--i:0">H</span><span style="--i:1">O</span><span style="--i:2">L</span><span style="--i:3">L</span><span style="--i:4">O</span><span style="--i:5">W</span>
+            <span class="gap"></span>
+            <span style="--i:7">M</span><span style="--i:8">I</span><span style="--i:9">L</span><span style="--i:10">O</span>
+          </h1>
+          <p class="subtitle home-subtitle">Descend through seven forgotten realms, fell their guardians, gather Geo, and awaken new vessels at the shrine.</p>
+        </header>
+
+        <div class="home-stats" role="group" aria-label="Progress">
+          <span class="stat-pill"><svg class="icon" aria-hidden="true"><use href="#icon-geo"/></svg> <b id="home-coins">0</b></span>
+          <span class="stat-pill"><svg class="icon" aria-hidden="true"><use href="#icon-vessel"/></svg> <b id="current-hero">Milo</b></span>
+          <button class="stat-pill chip-btn" id="account-chip" type="button" onclick="openAccount()">👤 Guest</button>
+          <button class="stat-pill chip-btn" id="home-auth-button" type="button" onclick="openLogin()">👤 Log in</button>
         </div>
 
-        <div class="menu-actions">
-          <button class="game-button" type="button" onclick="openMap()">▶ Levels</button>
-          <button class="game-button primary" type="button" onclick="openMetro()">🕳 Descend</button>
-          <button class="game-button wish" type="button" onclick="openGacha()">🕯 Wish</button>
-          <button class="game-button" type="button" onclick="openHeroes()">🕯 Vessels</button>
-          <button class="game-button" id="home-auth-button" type="button" onclick="openLogin()">👤 Log in</button>
-          <button class="game-button" type="button" onclick="openSettings()">⚙ Settings</button>
-        </div>
+        <nav class="menu-nav" aria-label="Main menu">
+          <button class="menu-btn play" type="button" onclick="goScreen(openPlay)">
+            <svg class="icon" aria-hidden="true"><use href="#icon-play"/></svg>
+            <span class="menu-btn-label">Play</span>
+            <span class="menu-btn-sub">Begin the journey</span>
+          </button>
 
-        <div class="controls-card">
-          <h2>Controls</h2>
-          <p><b>Descend (Metroidvania):</b> <kbd>↑</kbd> rest/talk · hold <kbd>↑</kbd>/<kbd>↓</kbd> + attack to aim · <kbd>Q</kbd> heal · <kbd>R</kbd> Lantern · <kbd>G</kbd> hook · <kbd>↓</kbd>+<kbd>Space</kbd> in air: dive · <kbd>M</kbd> map · <kbd>C</kbd> charms at benches · <kbd>Esc</kbd> pause<br><b>Levels:</b> <kbd>A</kbd>/<kbd>D</kbd> or arrows: move · <kbd>Space</kbd>: jump / ladder · <kbd>F</kbd>/<kbd>J</kbd>: attack · <kbd>E</kbd>: special · <kbd>Shift</kbd>: dash</p>
-        </div>
+          <div class="menu-group" aria-label="Journey">
+            <button class="menu-btn" type="button" onclick="goScreen(openGacha)">
+              <svg class="icon" aria-hidden="true"><use href="#icon-wish"/></svg>
+              <span class="menu-btn-label">Wish</span>
+              <span class="menu-btn-sub">Summon vessels</span>
+            </button>
+            <button class="menu-btn" type="button" onclick="goScreen(openHeroes)">
+              <svg class="icon" aria-hidden="true"><use href="#icon-vessel"/></svg>
+              <span class="menu-btn-label">Vessels</span>
+              <span class="menu-btn-sub">Choose your hero</span>
+            </button>
+          </div>
+
+          <div class="menu-group system" aria-label="System">
+            <button class="menu-btn ghost" type="button" onclick="goScreen(openSettings)">
+              <svg class="icon" aria-hidden="true"><use href="#icon-gear"/></svg>
+              <span class="menu-btn-label">Settings</span>
+            </button>
+            <button class="menu-btn ghost" type="button" onclick="goScreen(openControls)">
+              <svg class="icon" aria-hidden="true"><use href="#icon-pad"/></svg>
+              <span class="menu-btn-label">Controls</span>
+            </button>
+            <button class="menu-btn ghost" type="button" onclick="goScreen(openCredits)">
+              <svg class="icon" aria-hidden="true"><use href="#icon-scroll"/></svg>
+              <span class="menu-btn-label">Credits</span>
+            </button>
+            <button class="menu-btn ghost" type="button" onclick="openQuit()">
+              <svg class="icon" aria-hidden="true"><use href="#icon-exit"/></svg>
+              <span class="menu-btn-label">Quit</span>
+            </button>
+          </div>
+        </nav>
+
+        <p class="menu-hint" id="menu-hint">
+          <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> select · <kbd>Esc</kbd> back · gamepad supported
+        </p>
       </div>
     </section>
+
+    <!-- Play: mode select (both existing game modes) -->
+    <div id="play-overlay" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="play-title">
+      <div class="overlay-card">
+        <button class="overlay-close" type="button" data-close onclick="closeOverlay()" aria-label="Close">✕</button>
+        <div class="eyebrow">Choose your path</div>
+        <h2 id="play-title">Play</h2>
+        <div class="mode-grid">
+          <button class="mode-card" type="button" onclick="goScreen(openMap)">
+            <svg class="icon mode-icon" aria-hidden="true"><use href="#icon-flag"/></svg>
+            <strong>Levels</strong>
+            <span>Seven worlds of classic platforming — climb, fight, and reach the goal banner.</span>
+            <em>▶ Enter</em>
+          </button>
+          <button class="mode-card" type="button" onclick="goScreen(openMetro)">
+            <svg class="icon mode-icon" aria-hidden="true"><use href="#icon-ladder"/></svg>
+            <strong>Descend</strong>
+            <span>The Hollow Descent — a Metroidvania dive through rooms, abilities, charms and a boss below.</span>
+            <em>▶ Enter</em>
+          </button>
+        </div>
+        <button class="back-button" type="button" data-close onclick="closeOverlay()">← Back</button>
+      </div>
+    </div>
+
+    <!-- Quit: web games cannot close the tab; this returns to the Threshold. -->
+    <div id="quit-overlay" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="quit-title">
+      <div class="overlay-card small">
+        <svg class="icon quit-icon" aria-hidden="true"><use href="#icon-exit"/></svg>
+        <h2 id="quit-title">Return to the Threshold?</h2>
+        <p class="overlay-copy">Your journey is saved. The gate will wait for you.</p>
+        <div class="overlay-actions">
+          <button class="menu-btn" type="button" data-close onclick="closeOverlay()">Stay</button>
+          <button class="menu-btn danger" type="button" onclick="confirmQuit()">Quit to title</button>
+        </div>
+      </div>
+    </div>
 
     <section id="heroes-screen" class="screen hidden menu-screen scroll-screen">
       <div class="content-shell">
         <header class="screen-header">
-          <button class="back-button compact" type="button" onclick="showHome()">← Home</button>
+          <button class="back-button compact" type="button" onclick="goScreen(showHome)">← Home</button>
           <div>
             <div class="eyebrow">Vessels</div>
             <h1>Choose Your Vessel</h1>
@@ -256,7 +359,7 @@
 
     <section id="settings-screen" class="screen hidden menu-screen">
       <div class="menu-card settings-card">
-        <button class="back-button compact" type="button" onclick="showHome()">← Home</button>
+        <button class="back-button compact" type="button" onclick="goScreen(showHome)">← Home</button>
         <div class="eyebrow">Options</div>
         <h1>Settings</h1>
 
@@ -276,7 +379,126 @@
           <button class="toggle-button" type="button" onclick="toggleSetting(this)">ON</button>
         </div>
 
-        <p class="settings-note">Settings are saved locally and (if you are signed in) in your cloud save. The Music toggle also controls ambient sound.</p>
+        <div class="eyebrow settings-section">Interface &amp; controls</div>
+
+        <div class="setting-row">
+          <div>
+            <strong>Control hints</strong>
+            <p>Context prompts for ladders and the goal banner.</p>
+          </div>
+          <button class="toggle-button" type="button" data-opt="controlHints" onclick="toggleSetting(this)">ON</button>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <strong>Reduce motion</strong>
+            <p>Calmer menus: no entrance or wipe animations.</p>
+          </div>
+          <button class="toggle-button" type="button" data-opt="reduceMotion" onclick="toggleSetting(this)">OFF</button>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <strong>High-contrast HUD</strong>
+            <p>Stronger outlines and text over the game world.</p>
+          </div>
+          <button class="toggle-button" type="button" data-opt="highContrast" onclick="toggleSetting(this)">OFF</button>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <strong>Controls</strong>
+            <p>See the full control scheme for every mode.</p>
+          </div>
+          <button class="toggle-button" type="button" onclick="goScreen(openControls)">VIEW</button>
+        </div>
+
+        <p class="settings-note">Settings are saved locally and (if you are signed in) in your cloud save. The Music toggle also controls ambient sound; the Descent &amp; accessibility rows below apply everywhere.</p>
+      </div>
+    </section>
+
+    <section id="controls-screen" class="screen hidden menu-screen scroll-screen">
+      <div class="content-shell">
+        <header class="screen-header">
+          <button class="back-button compact" type="button" onclick="goScreen(showHome)">← Home</button>
+          <div>
+            <div class="eyebrow">Reference</div>
+            <h1>Controls</h1>
+          </div>
+        </header>
+
+        <div class="controls-grid">
+          <div class="menu-card controls-panel">
+            <h2><svg class="icon" aria-hidden="true"><use href="#icon-flag"/></svg> Levels — classic platforming</h2>
+            <ul class="key-list">
+              <li><span><kbd>A</kbd>/<kbd>D</kbd> or <kbd>←</kbd>/<kbd>→</kbd></span><em>Move</em></li>
+              <li><span><kbd>W</kbd>/<kbd>↑</kbd></span><em>Climb up a ladder</em></li>
+              <li><span><kbd>S</kbd>/<kbd>↓</kbd></span><em>Climb down a ladder</em></li>
+              <li><span><kbd>Space</kbd></span><em>Jump · hop off a ladder</em></li>
+              <li><span><kbd>F</kbd> / <kbd>J</kbd></span><em>Attack</em></li>
+              <li><span><kbd>E</kbd></span><em>Interact · special ability</em></li>
+              <li><span><kbd>Shift</kbd></span><em>Dash</em></li>
+              <li><span><kbd>Esc</kbd></span><em>Pause</em></li>
+            </ul>
+            <p class="settings-note">Ladders need no jump — walk onto one and press <kbd>W</kbd> or <kbd>S</kbd>. Leave at the top, at the ground, sideways, or hop off with <kbd>Space</kbd>.</p>
+          </div>
+
+          <div class="menu-card controls-panel">
+            <h2><svg class="icon" aria-hidden="true"><use href="#icon-ladder"/></svg> Descend — the Hollow Descent</h2>
+            <ul class="key-list">
+              <li><span><kbd>↑</kbd></span><em>Rest / talk</em></li>
+              <li><span>hold <kbd>↑</kbd>/<kbd>↓</kbd> + attack</span><em>Aim</em></li>
+              <li><span><kbd>Q</kbd></span><em>Heal</em></li>
+              <li><span><kbd>R</kbd></span><em>Lantern</em></li>
+              <li><span><kbd>G</kbd></span><em>Hook</em></li>
+              <li><span><kbd>↓</kbd>+<kbd>Space</kbd> in air</span><em>Dive</em></li>
+              <li><span><kbd>M</kbd> · <kbd>C</kbd> at benches</span><em>Map · charms</em></li>
+              <li><span><kbd>Esc</kbd></span><em>Pause</em></li>
+            </ul>
+          </div>
+
+          <div class="menu-card controls-panel">
+            <h2><svg class="icon" aria-hidden="true"><use href="#icon-pad"/></svg> Menus &amp; gamepad</h2>
+            <ul class="key-list">
+              <li><span><kbd>↑</kbd><kbd>↓</kbd> / <kbd>W</kbd><kbd>S</kbd></span><em>Move the selection</em></li>
+              <li><span><kbd>Enter</kbd> / <kbd>Space</kbd></span><em>Select</em></li>
+              <li><span><kbd>Esc</kbd></span><em>Back / close</em></li>
+              <li><span>D-pad / left stick</span><em>Navigate &amp; move</em></li>
+              <li><span>A · X · B</span><em>Jump · attack · interact</em></li>
+              <li><span>RB · Start</span><em>Dash · pause</em></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="credits-screen" class="screen hidden menu-screen">
+      <div class="content-shell credits-shell">
+        <header class="screen-header">
+          <button class="back-button compact" type="button" onclick="goScreen(showHome)">← Home</button>
+          <div>
+            <div class="eyebrow">The lantern remembers</div>
+            <h1>Credits</h1>
+          </div>
+        </header>
+
+        <div class="menu-card credits-card">
+          <svg class="credits-milo" viewBox="0 0 64 72" aria-hidden="true"><use href="#milo-glyph"/></svg>
+          <h2>Hollow Milo</h2>
+          <p class="credits-tag">An original, hand-crafted adventure in a forgotten kingdom.</p>
+
+          <dl class="credits-list">
+            <div><dt>Story, world &amp; vessels</dt><dd>The Hollow Milo team</dd></div>
+            <div><dt>Art, animation &amp; effects</dt><dd>Procedural — drawn in code, no asset packs</dd></div>
+            <div><dt>Music &amp; ambience</dt><dd>Generated at runtime (WebAudio)</dd></div>
+            <div><dt>Typeface</dt><dd>Cinzel by Natanael Gama — SIL Open Font License</dd></div>
+            <div><dt>Accounts &amp; cloud saves</dt><dd>Supabase</dd></div>
+            <div><dt>Engine</dt><dd>Vanilla JavaScript &amp; HTML Canvas</dd></div>
+          </dl>
+
+          <p class="credits-note">Inspired by the mood of games like Hollow Knight — every name, character and line of art here is original.</p>
+          <p class="credits-thanks">✦ Thank you for playing — carry the light. ✦</p>
+        </div>
       </div>
     </section>
 
@@ -285,17 +507,67 @@
 
       <div class="game-hud" aria-live="polite">
         <div class="hud-group">
-          <span class="hud-pill">❤️ <span id="health">3</span></span>
-          <div class="health-bar" aria-hidden="true">
-            <div id="health-fill" class="health-fill"></div>
+          <span class="hud-pill geo-pill">◈ <span id="game-coins">0</span></span>
+          <div class="hud-vitals">
+            <div class="hud-masks" id="hud-masks" aria-hidden="true"></div>
+            <div class="hud-health-line">
+              <svg class="icon heart-icon" aria-hidden="true"><use href="#icon-heart"/></svg>
+              <span class="hud-count"><span id="health">3</span><small>/3</small></span>
+              <div class="health-bar" aria-hidden="true">
+                <div id="health-fill" class="health-fill"></div>
+              </div>
+            </div>
           </div>
         </div>
-        <span class="hud-pill">◈ <span id="game-coins">0</span></span>
-        <button class="hud-button" type="button" onclick="openMap()" aria-label="Open world map">🗺 Map</button>
+
+        <div class="hud-objective">
+          <strong id="hud-level">Forgotten Crossroads · Level 1</strong>
+          <span id="hud-goal">Reach the goal banner</span>
+        </div>
+
+        <div class="hud-group hud-actions">
+          <button class="hud-button" id="pause-btn" type="button" onclick="togglePause()" aria-label="Pause the game">
+            <svg class="icon" aria-hidden="true"><use href="#icon-pause"/></svg><span>Pause</span>
+          </button>
+          <button class="hud-button" type="button" onclick="goScreen(openMap)" aria-label="Open world map">
+            <svg class="icon" aria-hidden="true"><use href="#icon-map"/></svg><span>Map</span>
+          </button>
+        </div>
       </div>
 
-      <div id="climb-message" class="climb-message hidden">Press Space to use ladder</div>
+      <div id="context-prompt" class="context-prompt hidden" aria-hidden="true"></div>
+
+      <!-- Pause: freezes the level; Esc resumes. Controls live inline so leaving
+           the pause menu never risks losing the run. -->
+      <div id="pause-overlay" class="pause-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+        <div class="overlay-card pause-card">
+          <div class="eyebrow">The world holds its breath</div>
+          <h2 id="pause-title">Paused</h2>
+          <div class="pause-actions">
+            <button class="menu-btn play" type="button" onclick="togglePause()">
+              <svg class="icon" aria-hidden="true"><use href="#icon-play"/></svg>
+              <span class="menu-btn-label">Resume</span>
+            </button>
+            <button class="menu-btn" type="button" onclick="restartLevel()">Restart level</button>
+            <button class="menu-btn" type="button" onclick="goScreen(openMap)">World map</button>
+            <button class="menu-btn ghost" type="button" onclick="goScreen(showHome)">Home</button>
+          </div>
+          <details class="pause-controls">
+            <summary>Controls</summary>
+            <ul class="key-list compact">
+              <li><span><kbd>A</kbd>/<kbd>D</kbd> · <kbd>←</kbd>/<kbd>→</kbd></span><em>Move</em></li>
+              <li><span><kbd>W</kbd>/<kbd>↑</kbd> · <kbd>S</kbd>/<kbd>↓</kbd></span><em>Climb ladders</em></li>
+              <li><span><kbd>Space</kbd> · <kbd>Shift</kbd></span><em>Jump · dash</em></li>
+              <li><span><kbd>F</kbd>/<kbd>J</kbd> · <kbd>E</kbd></span><em>Attack · interact/ability</em></li>
+            </ul>
+          </details>
+          <p class="menu-hint"><kbd>Esc</kbd> resume</p>
+        </div>
+      </div>
     </section>
+
+    <!-- Full-screen wipe used between menus and gameplay (js/menuNav.js). -->
+    <div id="screen-wipe" class="screen-wipe" aria-hidden="true"></div>
   </main>
 
   <!-- Safety net: if the game never boots (blocked script, old cache, JS error) show a way out instead of a frozen bar. -->

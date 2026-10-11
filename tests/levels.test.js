@@ -273,5 +273,147 @@ ok(hurt === 0 || health < hp0, "level: taking damage reduces health");
   ok(Art._test.spriteCount() === before, "performance: the sprite cache does not grow while the game runs");
 }
 
+/* ---------------------------------------------------------------- 9. polish pass
+   Ladders without the jump-first toggle, the grounded goal banner,
+   E-interact, and the pause freeze. */
+{
+  /* goal banner: planted on the ground at the end of the level */
+  startLevel(0, 0);
+  enemies.length = 0;
+  player.invincible = 9999;
+
+  const groundY = platforms[0].y;
+  ok(!!finishLine && finishLine.y + finishLine.height === groundY,
+    "flag: the goal banner's box ends exactly on the ground line");
+  ok(!!finishLine && finishLine.x > levelWidth - 400 && finishLine.x < levelWidth,
+    "flag: the banner stands near the end of the level");
+  ok(ladders.length > 0, "ladder: levels generate ladders to climb");
+  ok(checkpoints.length > 0 && checkpoints.every(c => c.y === groundY),
+    "flag: checkpoint banners are planted on the ground line too");
+
+  /* W alone grabs a ladder — the jump-first toggle is gone */
+  const ladder = ladders.reduce((best, l) => (l.height > best.height ? l : best), ladders[0]);
+  /* start with the feet inside the ladder span (the body is 64px tall) */
+  const midY = Math.min(platforms[0].y, ladder.y + ladder.height - 16) - player.height;
+  player.x = ladder.x + ladder.width / 2 - player.width / 2;
+  player.y = midY; player.vx = 0; player.vy = 0;
+  player.climbing = false; player.climbLadder = null; player.grabCd = 0; player.sideHold = 0;
+  Object.keys(keys).forEach(k => keys[k] = false);
+  keys["w"] = true;
+  updateGame();
+  ok(player.climbing === true && player.climbLadder === ladder,
+    "ladder: W on a ladder starts climbing without pressing jump first");
+
+  const yBefore = player.y;
+  updateGame();
+  ok(player.y < yBefore, "ladder: holding W climbs upward");
+
+  /* Space hops off instead of toggling */
+  handleSpace();
+  ok(player.climbing === false && player.vy < 0,
+    "ladder: Space hops off the ladder with a small jump");
+
+  /* sideways pressure steps off */
+  player.x = ladder.x + ladder.width / 2 - player.width / 2;
+  player.y = midY; player.vx = 0; player.vy = 0;
+  player.climbing = true; player.climbLadder = ladder; player.grabCd = 0; player.sideHold = 0;
+  Object.keys(keys).forEach(k => keys[k] = false);
+  keys["d"] = true;
+  for (let i = 0; i < 10; i++) updateGame();
+  ok(player.climbing === false, "ladder: pressing sideways steps off the ladder");
+
+  /* climbing to the top lands on the platform */
+  player.x = ladder.x + ladder.width / 2 - player.width / 2;
+  player.y = midY; player.vx = 0; player.vy = 0;
+  player.climbing = true; player.climbLadder = ladder; player.grabCd = 0; player.sideHold = 0;
+  Object.keys(keys).forEach(k => keys[k] = false);
+  keys["w"] = true;
+  for (let i = 0; i < 80 && player.climbing; i++) updateGame();
+  ok(player.climbing === false && player.grounded &&
+     Math.abs(player.y + player.height - ladder.y) <= 2,
+    "ladder: reaching the top steps the player onto the platform");
+
+  /* S at that platform grabs the ladder again to climb down */
+  Object.keys(keys).forEach(k => keys[k] = false);
+  keys["s"] = true;
+  player.grabCd = 0;
+  updateGame();
+  ok(player.climbing === true,
+    "ladder: S at the top platform grabs the ladder to climb down");
+  const yTop = player.y;
+  for (let i = 0; i < 20; i++) updateGame();
+  ok(player.climbing === true && player.y > yTop + 30,
+    "ladder: holding S climbs downward through the span");
+
+  /* pause freezes the level */
+  Object.keys(keys).forEach(k => keys[k] = false);
+  togglePause();
+  const px = player.x, py = player.y;
+  keys["d"] = true;
+  for (let i = 0; i < 10; i++) updateGame();
+  ok(paused === true && player.x === px && player.y === py,
+    "pause: the level does not update while paused");
+  togglePause();
+  ok(paused === false, "pause: resuming returns to the game");
+  Object.keys(keys).forEach(k => keys[k] = false);
+}
+
+{
+  /* Space is a pure jump again */
+  startLevel(0, 0);
+  enemies.length = 0;
+  player.invincible = 9999;
+  player.x = 200; player.y = platforms[0].y - player.height;
+  player.vx = 0; player.vy = 0; player.climbing = false;
+  Object.keys(keys).forEach(k => keys[k] = false);
+  updateGame();                       /* settle: feet on the ground */
+  handleSpace();
+  updateGame();
+  ok(player.vy < 0, "controls: Space jumps without touching any ladder");
+}
+
+{
+  /* touching the banner completes the level */
+  startLevel(1, 0);
+  enemies.length = 0;
+  player.invincible = 9999;
+  player.x = finishLine.x + finishLine.width / 2 - player.width / 2;
+  player.y = platforms[0].y - player.height;
+  player.vx = 0; player.vy = 0;
+  updateGame();
+  ok(gameRunning === false, "flag: touching the banner completes the level");
+}
+
+{
+  /* E near the banner is the interaction; walking up to it does not auto-win */
+  startLevel(1, 1);
+  enemies.length = 0;
+  player.invincible = 9999;
+  player.x = finishLine.x - 60;
+  player.y = platforms[0].y - player.height;
+  player.vx = 0; player.vy = 0;
+  updateGame();
+  ok(gameRunning === true, "flag: the banner does not finish the level before contact");
+  const interacted = tryInteract();
+  ok(interacted === true && gameRunning === false,
+    "flag: E near the banner completes the level");
+}
+
+{
+  /* boss levels seal the banner until the guardian falls */
+  startLevel(0, 3);
+  enemies.length = 0;
+  player.invincible = 9999;
+  player.x = finishLine.x + 20;
+  player.y = platforms[0].y - player.height;
+  player.vx = 0; player.vy = 0;
+  updateGame();
+  ok(gameRunning === true && finishLocked(),
+    "flag: the banner stays sealed while the guardian lives");
+  boss.alive = false;
+  ok(tryInteract() === true && gameRunning === false,
+    "flag: defeating the guardian releases the banner");
+}
+
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);
