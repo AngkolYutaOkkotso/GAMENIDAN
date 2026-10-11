@@ -699,18 +699,19 @@ const Art = (() => {
         const dead = o.dead || 0;
 
         /* breathing + gait */
-        const air = !!o.air, dashing = (o.dash || 0) > 0;
-        const breath = air ? 0 : Math.sin(t / 32) * 1.2;
-        const bob = air ? 0 : Math.abs(Math.sin(walk)) * 1.4;
-        const legA = air ? -2 : Math.sin(walk) * 5, legB = air ? 2 : -Math.sin(walk) * 5;
+        const air = !!o.air, dashing = (o.dash || 0) > 0, climbing = (o.climb || 0) > 0;
+        const breath = air ? 0 : climbing ? Math.sin(t / 32) * .8 : Math.sin(t / 32) * 1.2;
+        const bob = air ? 0 : climbing ? Math.abs(Math.sin(t / 7)) * 1.1 : Math.abs(Math.sin(walk)) * 1.4;
+        const legA = air ? -2 : climbing ? Math.sin(t / 7) * 4.5 : Math.sin(walk) * 5;
+        const legB = air ? 2 : climbing ? -Math.sin(t / 7) * 4.5 : -Math.sin(walk) * 5;
         const sway = Math.sin(t / 40) * 1.4;
-        const lean = dashing ? .16 : (air ? Math.max(-.12, Math.min(.12, (o.vy || 0) / 90)) : 0);
+        const lean = dashing ? .16 : climbing ? .1 : (air ? Math.max(-.12, Math.min(.12, (o.vy || 0) / 90)) : 0);
         const stretch = air ? (o.vy < 0 ? 1.07 : 1.04) : 1;
 
-        /* shadow: shrinks while airborne so jumps read */
+        /* shadow: shrinks while airborne (and on ladders) so height reads */
         ctx.save();
         ctx.fillStyle = SHADOW;
-        const sc = air ? Math.max(.4, 1 - Math.abs(o.y - (o.groundY || o.y)) / 400) : 1;
+        const sc = (air || climbing) ? Math.max(.4, 1 - Math.abs(o.y - (o.groundY || o.y)) / 400) : 1;
         ellipse(ctx, o.x + w / 2, (o.groundY || o.y + h) - 3, w * .34 * sc, 4 * sc); ctx.fill();
         ctx.restore();
 
@@ -784,7 +785,7 @@ const Art = (() => {
         ctx.globalAlpha = .7; rr(ctx, -capW, capY + 1, capW * 2, 3.5, 2); ctx.fill(); ctx.globalAlpha = 1;
         if (!simple) { ellipse(ctx, -6, capY - 3.4, 3.4, 2.2); ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.fill(); }  // pale patch (3)
         ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineCap = "round";
-        const ant = Math.sin(t / 26) * 1.6 + (air ? -1.5 : 0);
+        const ant = Math.sin(t / 26) * 1.6 + (air ? -1.5 : climbing ? -1 : 0);
         ctx.beginPath();
         ctx.moveTo(-3, capY - capH + 1); ctx.quadraticCurveTo(-6, capY - capH - 6, -9 - ant, capY - capH - 9 - ant);
         ctx.moveTo(5, capY - capH + 1); ctx.quadraticCurveTo(8, capY - capH - 6, 11 + ant, capY - capH - 8 - ant);

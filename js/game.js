@@ -60,7 +60,11 @@ const defaultSave = {
     completedLevels: {},
     settings: {
         music: true,
-        sound: true
+        sound: true,
+        /* --- interface & accessibility (polish pass) --- */
+        controlHints: true,
+        reduceMotion: false,
+        highContrast: false
     },
     /* --- added: cloud-save + gacha fields --- */
     savedAt: 0,
@@ -360,17 +364,40 @@ const screenIds = [
     "home-screen",
     "heroes-screen",
     "settings-screen",
+    "controls-screen",
+    "credits-screen",
     "gacha-screen",
     "metro-screen",
     "map-screen"
 ];
 
 let gameRunning = false;
+let paused = false;
 let animationId = null;
+
+/* Every overlay that floats above a screen (play / quit / pause / result). */
+function closeOverlay() {
+    ["play-overlay", "quit-overlay", "pause-overlay"].forEach(id => {
+        const el = $(id);
+        if (el) el.classList.add("hidden");
+    });
+}
+
+/* Screen swaps that deserve a transition are wrapped in a short wipe
+   (js/menuNav.js). Falls back to an instant swap when unavailable. */
+function goScreen(fn) {
+    if (window.MenuNav && MenuNav.wipe) MenuNav.wipe(fn);
+    else if (typeof fn === "function") fn();
+}
+
+function playLevel(world, level) {
+    goScreen(() => startLevel(world, level));
+}
 
 function hideScreens() {
     if (window.Metro) Metro.stop();      // leaving the Descent: stop its loop + save
     clearInput();                        // no key may survive a screen change
+    closeOverlay();
     screenIds.forEach(id => {
         const screen = $(id);
 
@@ -391,8 +418,13 @@ function stopGame() {
     }
 }
 
+function menuReady() {
+    if (window.MenuNav && MenuNav.autoSelect) MenuNav.autoSelect();
+}
+
 function showHome() {
     stopGame();
+    paused = false;
 
     const result = $("result-overlay");
     if (result) result.remove();
@@ -409,6 +441,7 @@ function showHome() {
     }
 
     updateAllHUD();
+    menuReady();
 }
 
 function openHeroes() {
@@ -424,6 +457,7 @@ function openHeroes() {
 
     renderHeroes();
     updateAllHUD();
+    menuReady();
 }
 
 function openSettings() {
@@ -438,10 +472,40 @@ function openSettings() {
     }
 
     updateSettingsButtons();
+    menuReady();
+}
+
+function openControls() {
+    stopGame();
+
+    hideScreens();
+
+    const screen = $("controls-screen");
+
+    if (screen) {
+        screen.classList.remove("hidden");
+    }
+
+    menuReady();
+}
+
+function openCredits() {
+    stopGame();
+
+    hideScreens();
+
+    const screen = $("credits-screen");
+
+    if (screen) {
+        screen.classList.remove("hidden");
+    }
+
+    menuReady();
 }
 
 function openMap() {
     stopGame();
+    paused = false;
 
     hideScreens();
 
@@ -452,6 +516,64 @@ function openMap() {
     }
 
     showWorldMap();
+    menuReady();
+}
+
+/* ---------- play / quit overlays (the home screen stays behind them) ---- */
+
+function openPlay() {
+    const overlay = $("play-overlay");
+    if (!overlay) return;
+    overlay.classList.remove("hidden");
+    Sfx("click");
+    menuReady();
+}
+
+function openQuit() {
+    const overlay = $("quit-overlay");
+    if (!overlay) return;
+    overlay.classList.remove("hidden");
+    Sfx("click");
+    menuReady();
+}
+
+/* Quit = return to the Threshold (a web page cannot close its own tab).
+   Progress is already in the save; the gate keeps the fiction intact. */
+function confirmQuit() {
+    closeOverlay();
+    goScreen(() => {
+        if (window.openLogin) openLogin();
+        else showHome();
+    });
+}
+
+/* ---------- pause (Levels) --------------------------------------------- */
+
+function togglePause() {
+
+    if (!gameRunning) return;
+
+    paused = !paused;
+
+    const overlay = $("pause-overlay");
+
+    if (overlay) {
+        overlay.classList.toggle("hidden", !paused);
+    }
+
+    clearInput();
+
+    if (paused) {
+        Sfx("click");
+        menuReady();
+    }
+}
+
+function restartLevel() {
+    paused = false;
+    const overlay = $("pause-overlay");
+    if (overlay) overlay.classList.add("hidden");
+    goScreen(() => startLevel(currentWorld, currentLevel));
 }
 
 /* =========================================================
@@ -554,8 +676,28 @@ function startLoading() {
    SETTINGS
 ========================================================= */
 
+/* Reflect the interface settings on <html> so CSS can honour them. */
+function applySettingsClasses() {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    if (!root || !root.classList) return;
+    root.classList.toggle("reduce-motion", !!save.settings.reduceMotion);
+    root.classList.toggle("high-contrast", !!save.settings.highContrast);
+}
+
 function toggleSetting(button) {
     if (!button) return;
+
+    /* Interface rows are driven by data-opt, not by their title text. */
+    const opt = button.dataset ? button.dataset.opt : null;
+
+    if (opt) {
+        save.settings[opt] = !save.settings[opt];
+        applySettingsClasses();
+        saveGame();
+        updateSettingsButtons();
+        return;
+    }
 
     const row = button.closest(".setting-row");
 
@@ -598,6 +740,14 @@ function updateSettingsButtons() {
         if (title.includes("Sound")) {
             button.textContent =
                 save.settings.sound ? "ON" : "OFF";
+        }
+    });
+
+    /* interface rows (control hints, reduce motion, high contrast) */
+    document.querySelectorAll("[data-opt]").forEach(button => {
+        const opt = button.dataset.opt;
+        if (opt in save.settings) {
+            button.textContent = save.settings[opt] ? "ON" : "OFF";
         }
     });
 }
@@ -806,7 +956,7 @@ function showWorldMap() {
                                                 : "disabled"
                                         }
                                         onclick="
-                                            startLevel(
+                                            playLevel(
                                                 ${wi},
                                                 ${li}
                                             )
@@ -982,7 +1132,14 @@ const player = {
     squash: 0,
     wasAir: false,
     shadowY: 364,
-    stepT: 0
+    stepT: 0,
+
+    /* ---- ladders + input feel (polish pass) ---- */
+    climbLadder: null,     /* the ladder currently gripped */
+    grabCd: 0,             /* frames before a ladder may be re-grabbed */
+    sideHold: 0,           /* frames of sideways pressure while climbing */
+    coyote: 0,             /* frames after leaving ground where jump still works */
+    jumpBuffer: 0          /* frames a buffered jump press stays live */
 };
 
 /* =========================================================
@@ -1019,6 +1176,11 @@ function startLevel(world, level) {
 
     player.grounded = false;
     player.climbing = false;
+    player.climbLadder = null;
+    player.grabCd = 0;
+    player.sideHold = 0;
+    player.coyote = 0;
+    player.jumpBuffer = 0;
 
     player.invincible = 90;
     player.hurtTimer = 0;
@@ -1047,6 +1209,15 @@ function startLevel(world, level) {
     createLevel();
 
     updateAllHUD();
+
+    /* objective line: the one thing the player is told up front */
+    setHud("hud-level", worlds[currentWorld].name + " · Level " + (currentLevel + 1));
+    setHud("hud-goal", currentLevel === 3 ? "Defeat the guardian" : "Reach the goal banner");
+
+    paused = false;
+
+    const pauseMenu = $("pause-overlay");
+    if (pauseMenu) pauseMenu.classList.add("hidden");
 
     gameRunning = true;
 
@@ -1090,6 +1261,9 @@ function createLevel() {
         height: 120,
         type: "ground"
     });
+
+    /* the floor line: every flag and banner is planted on this surface */
+    const GROUND_Y = platforms[0].y;
 
     /* -------------------------
        PLATFORMS
@@ -1177,7 +1351,7 @@ function createLevel() {
     }
 
     /* -------------------------
-       CHECKPOINTS
+       CHECKPOINTS — small goal-style banners, planted on the ground
     ------------------------- */
 
     for (
@@ -1187,7 +1361,7 @@ function createLevel() {
     ) {
         checkpoints.push({
             x,
-            y: 455,
+            y: GROUND_Y,
             activated: false
         });
     }
@@ -1285,14 +1459,17 @@ function createLevel() {
     }
 
     /* -------------------------
-       FINISH LINE
+       FINISH LINE — the goal banner, planted ON the ground.
+       The box below is also the interaction area: it ends exactly on
+       the surface so the collider matches what the player sees.
     ------------------------- */
 
     finishLine = {
-        x: levelWidth - 220,
-        y: 390,
-        width: 80,
-        height: 130
+        x: levelWidth - 240,
+        y: GROUND_Y - 170,
+        width: 110,
+        height: 170,
+        phase: Math.random() * Math.PI * 2   /* pennant wave offset */
     };
 
     /* -------------------------
@@ -1700,14 +1877,21 @@ window.addEventListener(
     "keydown",
     event => {
 
-        /* Menus own the keyboard: never hijack Space / arrows while the
-           game is not running (or while the user is typing). */
-        if (!gameRunning || isTypingTarget(event.target)) {
+        const key =
+            event.key.toLowerCase();
+
+        /* Esc always works while a level runs: pause / resume. */
+        if (key === "escape" && gameRunning) {
+            event.preventDefault();
+            togglePause();
             return;
         }
 
-        const key =
-            event.key.toLowerCase();
+        /* Menus own the keyboard: never hijack Space / arrows while the
+           game is not running, paused, or while the user is typing. */
+        if (!gameRunning || paused || isTypingTarget(event.target)) {
+            return;
+        }
 
         if (!keys[key]) {
             justPressed[key] = true;
@@ -1735,7 +1919,9 @@ window.addEventListener(
         }
 
         if (key === "e") {
-            useSpecial();
+            /* E interacts with the goal banner; otherwise it is the
+               hero's special ability (unchanged behaviour). */
+            if (!tryInteract()) useSpecial();
         }
 
         if (event.key === "Shift") {
@@ -1752,71 +1938,199 @@ window.addEventListener(
     "keyup",
     event => {
 
-        keys[
-            event.key.toLowerCase()
-        ] = false;
+        const key = event.key.toLowerCase();
+
+        keys[key] = false;
+
+        /* variable jump height: releasing Space early cuts the rise */
+        if (key === " " && player.vy < -4) {
+            player.vy *= 0.55;
+        }
     }
 );
 
 window.addEventListener("blur", clearInput);
 
+/* Unified held-state: keyboard OR gamepad (js/menuNav.js). */
+function inputHeld(name) {
+    const pad = window.MenuNav && MenuNav.held;
+
+    switch (name) {
+        case "left":
+            return keys["arrowleft"] || keys["a"] || (pad && pad.left);
+        case "right":
+            return keys["arrowright"] || keys["d"] || (pad && pad.right);
+        case "up":
+            return keys["arrowup"] || keys["w"] || (pad && pad.up);
+        case "down":
+            return keys["arrowdown"] || keys["s"] || (pad && pad.down);
+    }
+
+    return false;
+}
+
+/* Gamepad edge actions route through here (js/menuNav.js polls the pad). */
+window.MiloInput = {
+    action(name) {
+        if (name === "pause" && gameRunning) {
+            togglePause();
+            return;
+        }
+        if (!gameRunning || paused) return;
+
+        if (name === "jump") handleSpace();
+        else if (name === "attack") attack();
+        else if (name === "dash") dash();
+        else if (name === "interact") { if (!tryInteract()) useSpecial(); }
+    }
+};
+
 /* =========================================================
-   SPACE / JUMP / CLIMB
+   SPACE / JUMP / LADDERS
+   Space is ONLY jump (and hop-off while climbing). Ladders are
+   used by walking onto them and pressing W/S — no jump toggle.
 ========================================================= */
+
+const CLIMB_SPEED = 2.7;
 
 function handleSpace() {
 
-    if (!gameRunning) return;
+    if (!gameRunning || paused) return;
 
-    if (isNearLadder()) {
-
-        player.climbing =
-            !player.climbing;
-
-        player.vy = 0;
-
+    /* climbing: hop off the ladder in the facing direction */
+    if (player.climbing) {
+        stopClimb(true);
         return;
     }
 
-    if (player.grounded) {
+    /* buffered jump: consumed by updatePlayer (survives hit-stop) */
+    player.jumpBuffer = 7;
+}
 
-        player.vy =
-            -player.jumpPower;
+/* The player's body overlaps a ladder (generous side margin).
+   The feet must be clearly below the top: standing on the platform a
+   ladder hangs from does NOT count as "on" the ladder. */
+function overLadder() {
 
-        player.grounded = false;
+    return ladders.find(ladder =>
+        player.x + player.width > ladder.x - 14 &&
+        player.x < ladder.x + ladder.width + 14 &&
+        player.y + player.height > ladder.y + 6 &&
+        player.y < ladder.y + ladder.height + 8
+    ) || null;
+}
 
-        createDust(
-            player.x + 20,
-            player.y + player.height
-        );
+/* Standing on (or just above) the platform a ladder hangs from. */
+function ladderFromTop() {
 
-        /* take-off: a little stretch, dust and a sound */
-        player.squash = -0.12;
-        Sfx("jump");
+    return ladders.find(ladder =>
+        player.x + player.width > ladder.x - 14 &&
+        player.x < ladder.x + ladder.width + 14 &&
+        player.y + player.height >= ladder.y - 10 &&
+        player.y + player.height <= ladder.y + 16
+    ) || null;
+}
+
+function startClimb(ladder) {
+
+    if (!ladder) return;
+
+    player.climbing = true;
+    player.climbLadder = ladder;
+    player.grounded = false;
+    player.vy = 0;
+    player.sideHold = 0;
+    player.squash = 0;
+
+    Sfx("latch");
+    createDust(player.x + player.width / 2, player.y + player.height);
+}
+
+function stopClimb(hop) {
+
+    player.climbing = false;
+    player.climbLadder = null;
+    player.grabCd = 12;
+    player.sideHold = 0;
+
+    if (hop) {
+        player.vy = -player.jumpPower * 0.62;
+        player.vx = player.direction * player.speed * 0.9;
+        player.squash = -0.1;
+        Sfx("wing");
     }
 }
 
 function isNearLadder() {
+    return !!overLadder() || !!ladderFromTop();
+}
 
-    return ladders.some(
-        ladder =>
-            player.x +
-                player.width >
-                ladder.x - 25 &&
+/* One ladder state machine, called from updatePlayer. All exits are
+   natural (top / ground / sideways / hop-off / leaving the span). */
+function updateClimb() {
 
-            player.x <
-                ladder.x +
-                ladder.width +
-                25 &&
+    const ladder = player.climbLadder;
 
-            player.y +
-                player.height >
-                ladder.y - 30 &&
+    if (!ladder) { stopClimb(false); return; }
 
-            player.y <
-                ladder.y +
-                ladder.height
-    );
+    /* left the ladder's vertical span: gravity resumes, no sticking */
+    const feet = player.y + player.height;
+
+    if (feet < ladder.y - 24 || player.y > ladder.y + ladder.height + 12) {
+        stopClimb(false);
+        return;
+    }
+
+    player.vy = 0;
+
+    const movingLeft = inputHeld("left");
+    const movingRight = inputHeld("right");
+    const movingUp = inputHeld("up");
+    const movingDown = inputHeld("down");
+
+    if (movingLeft || movingRight) {
+
+        /* sideways pressure: step off after a few frames */
+        player.x += (movingRight ? 1 : -1) * 1.8;
+        player.direction = movingRight ? 1 : -1;
+        player.sideHold++;
+
+        if (player.sideHold >= 5) {
+            player.vx = player.direction * player.speed * 0.6;
+            stopClimb(false);
+            return;
+        }
+    } else {
+        player.sideHold = 0;
+        /* hands free: ease onto the ladder's axis (stable grip, no jitter) */
+        const targetX = ladder.x + ladder.width / 2 - player.width / 2;
+        player.x += (targetX - player.x) * 0.25;
+    }
+
+    if (movingUp) player.y -= CLIMB_SPEED;
+    if (movingDown) player.y += CLIMB_SPEED;
+
+    /* top: step off onto the platform the ladder hangs from
+       (only while climbing up — climbing down passes this zone) */
+    if (movingUp && player.y + player.height <= ladder.y + 8) {
+        player.y = ladder.y - player.height;
+        player.grounded = true;
+        stopClimb(false);
+        player.grabCd = 10;
+        return;
+    }
+
+    /* ground: step off at the floor line (except while actively climbing
+       up from it — W on a ground-level ladder must start an ascent) */
+    const groundY = platforms.length ? platforms[0].y : 520;
+    const feetNow = player.y + player.height;
+
+    if (feetNow >= groundY && (!movingUp || feetNow > groundY + 4)) {
+        player.y = groundY - player.height;
+        player.grounded = true;
+        stopClimb(false);
+        player.grabCd = 10;
+    }
 }
 
 /* =========================================================
@@ -2314,7 +2628,7 @@ function damagePlayer(amount = 1) {
 
 function updateGame() {
 
-    if (!gameRunning) return;
+    if (!gameRunning || paused) return;
 
     const fx = Fx();
     if (fx) fx.step();
@@ -2347,82 +2661,119 @@ function updateGame() {
 
 function updatePlayer() {
 
-    const movingLeft =
-        keys["arrowleft"] ||
-        keys["a"];
+    const movingLeft = inputHeld("left");
+    const movingRight = inputHeld("right");
+    const movingUp = inputHeld("up");
+    const movingDown = inputHeld("down");
 
-    const movingRight =
-        keys["arrowright"] ||
-        keys["d"];
+    /* ---- ladders: W/S alone grabs and climbs (no jump-first toggle) ---- */
 
-    /* Movement */
+    if (player.grabCd > 0) player.grabCd--;
 
-    if (movingLeft) {
+    if (player.climbing) {
 
-        player.vx =
-            -player.speed;
+        updateClimb();
 
-        player.direction = -1;
-    }
+    } else if (player.grabCd === 0) {
 
-    else if (movingRight) {
+        const groundY = platforms.length ? platforms[0].y : 520;
+        let ladder = null;
 
-        player.vx =
-            player.speed;
+        if (movingUp) {
+            /* W anywhere on the ladder grabs it — no jump-first toggle */
+            ladder = overLadder();
+        }
 
-        player.direction = 1;
-    }
+        else if (movingDown && player.y + player.height < groundY - 4) {
+            /* S grabs the ladder under a platform (or one hung in the air),
+               but never from solid ground: that is already the bottom */
+            ladder = ladderFromTop() || overLadder();
+        }
 
-    else if (!player.climbing) {
-
-        player.vx *= 0.78;
-
-        if (
-            Math.abs(player.vx) < 0.1
-        ) {
-            player.vx = 0;
+        if (ladder) {
+            startClimb(ladder);
         }
     }
 
-    /* Special movement */
+    /* ---- horizontal movement: quick accel, clean decel ---- */
 
-    if (player.dashTimer > 0) {
-        player.vx =
-            player.direction *
-            Math.max(
-                8,
-                Math.abs(player.vx)
-            );
-    }
-
-    /* Climbing */
-
-    if (
-        player.climbing &&
-        isNearLadder()
-    ) {
-
-        player.vy = 0;
+    if (player.climbing) {
 
         player.vx = 0;
 
-        if (
-            keys["arrowup"] ||
-            keys["w"]
-        ) {
-            player.y -= 3;
-        }
-
-        if (
-            keys["arrowdown"] ||
-            keys["s"]
-        ) {
-            player.y += 3;
-        }
-
     } else {
 
-        player.climbing = false;
+        const dir = (movingRight ? 1 : 0) - (movingLeft ? 1 : 0);
+
+        if (dir !== 0) {
+
+            player.direction = dir;
+
+            const accel = player.grounded ? 0.55 : 0.32;
+            const target = dir * player.speed;
+
+            player.vx += (target - player.vx) * accel;
+
+            if (Math.abs(player.vx - target) < 0.05) {
+                player.vx = target;
+            }
+        }
+
+        else if (player.dashTimer <= 0) {
+
+            player.vx *= 0.78;
+
+            if (
+                Math.abs(player.vx) < 0.1
+            ) {
+                player.vx = 0;
+            }
+        }
+
+        /* Special movement */
+
+        if (player.dashTimer > 0) {
+            player.vx =
+                player.direction *
+                Math.max(
+                    8,
+                    Math.abs(player.vx)
+                );
+        }
+    }
+
+    /* ---- jump: buffered, coyote, consumed right here ---- */
+
+    if (player.jumpBuffer > 0) player.jumpBuffer--;
+    if (player.coyote > 0) player.coyote--;
+    if (player.grounded) player.coyote = 6;
+
+    if (
+        !player.climbing &&
+        player.jumpBuffer > 0 &&
+        (player.grounded || player.coyote > 0)
+    ) {
+
+        player.vy =
+            -player.jumpPower;
+
+        player.grounded = false;
+        player.coyote = 0;
+        player.jumpBuffer = 0;
+
+        createDust(
+            player.x + 20,
+            player.y + player.height
+        );
+
+        /* take-off: a little stretch, dust and a sound */
+        player.squash = -0.12;
+        Sfx("jump");
+    }
+
+    /* ---- vertical ---- */
+
+    if (!player.climbing) {
 
         player.vy += 0.62;
 
@@ -2431,13 +2782,14 @@ function updatePlayer() {
 
     player.x += player.vx;
 
-    /* Platform collision */
+    /* Platform collision (a climbing player grips the ladder instead:
+       the ladder state machine owns its vertical position) */
 
     const fallSpeed = player.vy;          // remembered for landing feedback
 
     player.grounded = false;
 
-    platforms.forEach(platform => {
+    if (!player.climbing) platforms.forEach(platform => {
         if (platform.x + platform.width < cameraX - 40 || platform.x > cameraX + window.innerWidth + 40) return;
 
 
@@ -3191,11 +3543,11 @@ function updateCheckpoints() {
                 checkpoint.x;
 
             player.checkpointY =
-                430;
+                platforms[0].y - player.height;
 
             createParticle(
                 checkpoint.x,
-                checkpoint.y - 30,
+                checkpoint.y - 110,
                 "✓"
             );
 
@@ -3203,10 +3555,10 @@ function updateCheckpoints() {
             const fx = Fx();
 
             if (fx) {
-                fx.ring(checkpoint.x, checkpoint.y + 10, 14, "#f2b84b");
+                fx.ring(checkpoint.x + 3, checkpoint.y - 8, 14, "#f2b84b");
                 fx.flash("#f2b84b", 0.16, 12);
                 fx.addShake(1.6);
-                fx.number(checkpoint.x, checkpoint.y - 40, "CHECKPOINT", "#f2b84b");
+                fx.number(checkpoint.x, checkpoint.y - 136, "CHECKPOINT", "#f2b84b");
             }
 
             Sfx("unlock");
@@ -3225,12 +3577,47 @@ function respawnAtCheckpoint() {
     player.vx = 0;
     player.vy = 0;
 
+    player.climbing = false;
+    player.climbLadder = null;
+    player.grabCd = 0;
+
     player.invincible = 100;
+
+    /* snap the camera back so it never drifts across the world */
+    cameraX = clamp(
+        player.x - window.innerWidth * 0.35,
+        0,
+        Math.max(0, levelWidth - window.innerWidth)
+    );
 }
 
 /* =========================================================
-   FINISH LINE
+   FINISH LINE — touch the banner (or press E near it) to finish.
+   Boss levels stay sealed until the guardian falls.
 ========================================================= */
+
+function finishLocked() {
+    return currentLevel === 3 && boss && boss.alive;
+}
+
+function nearFinishLine() {
+    if (!finishLine) return false;
+
+    return (
+        player.x + player.width > finishLine.x - 30 &&
+        player.x < finishLine.x + finishLine.width + 30 &&
+        player.y + player.height > finishLine.y + 40
+    );
+}
+
+/* E near the banner completes the level (the interaction key). */
+function tryInteract() {
+    if (!gameRunning || paused || !finishLine || finishLocked()) return false;
+    if (!nearFinishLine()) return false;
+
+    endLevel(true);
+    return true;
+}
 
 function updateFinishLine() {
 
@@ -3238,20 +3625,26 @@ function updateFinishLine() {
 
     /* Boss must be defeated first */
 
-    if (
-        currentLevel === 3 &&
-        boss &&
-        boss.alive
-    ) {
-        return;
-    }
+    if (finishLocked()) return;
 
+    /* Touching the banner completes the level. The pole-crossing test is a
+       safety net so a high jump can never skip the goal line. */
     if (
-        player.x >
-        finishLine.x
+        rectsOverlap(player, finishLine) ||
+        player.x > finishLine.x + 16
     ) {
 
         endLevel(true);
+        return;
+    }
+
+    /* proximity: the banner brightens as the player approaches */
+    if (nearFinishLine() && Math.random() < 0.10) {
+        createParticle(
+            finishLine.x + 4 + Math.random() * 14,
+            finishLine.y + 90 + Math.random() * 60,
+            "dust"
+        );
     }
 }
 
@@ -3285,21 +3678,32 @@ function pointInside(x, y, box) {
 
 function updateCamera() {
 
-    cameraX =
-        player.x -
-        window.innerWidth *
-        0.35;
+    /* look-ahead: the camera leans toward where the player is going */
+    const lookAhead = player.direction * 60;
 
-    cameraX =
-        clamp(
-            cameraX,
+    const target = clamp(
+        player.x -
+            window.innerWidth * 0.35 +
+            lookAhead,
+        0,
+        Math.max(
             0,
-            Math.max(
-                0,
-                levelWidth -
-                window.innerWidth
-            )
-        );
+            levelWidth -
+            window.innerWidth
+        )
+    );
+
+    const diff = target - cameraX;
+
+    /* ease toward the target; snap after teleports/respawns so the view
+       never drifts across the world */
+    if (Math.abs(diff) > 420) {
+        cameraX = target;
+    } else {
+        cameraX += diff * 0.12;
+    }
+
+    cameraX = clamp(cameraX, 0, Math.max(0, levelWidth - window.innerWidth));
 }
 
 /* =========================================================
@@ -3655,11 +4059,12 @@ function drawGame() {
 
     ctx.save();
 
-    /* camera shake moves the world, never the HUD or the menus */
+    /* camera shake moves the world, never the HUD or the menus;
+       the camera position is rounded so the world never blurs */
     const fx = Fx();
 
     ctx.translate(
-        -cameraX + (fx ? Math.round(fx.sx) : 0),
+        -Math.round(cameraX) + (fx ? Math.round(fx.sx) : 0),
         fx ? Math.round(fx.sy) : 0
     );
 
@@ -4714,16 +5119,32 @@ function drawCheckpoints() {
 
     checkpoints.forEach(checkpoint => {
 
+        if (checkpoint.x < cameraX - 90 || checkpoint.x > cameraX + window.innerWidth + 90) return;
+
+        const groundY = checkpoint.y;        /* planted on the surface */
+        const poleTop = groundY - 118;
+
+        /* stone footing: the pole rests on the ground */
+        ctx.fillStyle = "#3a3241";
+        ctx.beginPath();
+        ctx.ellipse(checkpoint.x + 3.5, groundY - 3, 15, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        /* pole */
         ctx.fillStyle =
             "#5b3824";
 
         ctx.fillRect(
             checkpoint.x,
-            checkpoint.y - 60,
+            poleTop,
             7,
-            60
+            groundY - poleTop
         );
 
+        ctx.fillStyle = "rgba(255,255,255,.12)";
+        ctx.fillRect(checkpoint.x + 1, poleTop, 2, groundY - poleTop);
+
+        /* pennant */
         ctx.fillStyle =
             checkpoint.activated
                 ? "#6ee86c"
@@ -4733,22 +5154,38 @@ function drawCheckpoints() {
 
         ctx.moveTo(
             checkpoint.x + 7,
-            checkpoint.y - 60
+            poleTop + 4
         );
 
         ctx.lineTo(
             checkpoint.x + 55,
-            checkpoint.y - 45
+            poleTop + 18
         );
 
         ctx.lineTo(
             checkpoint.x + 7,
-            checkpoint.y - 30
+            poleTop + 32
         );
 
         ctx.closePath();
 
         ctx.fill();
+
+        /* shape cue: a check-mark once lit, a dot while dark — the state
+           never relies on colour alone */
+        ctx.strokeStyle = checkpoint.activated ? "#0d2c14" : "rgba(80,58,20,.85)";
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+
+        if (checkpoint.activated) {
+            ctx.moveTo(checkpoint.x + 16, poleTop + 18);
+            ctx.lineTo(checkpoint.x + 22, poleTop + 23);
+            ctx.lineTo(checkpoint.x + 33, poleTop + 11);
+        } else {
+            ctx.arc(checkpoint.x + 22, poleTop + 18, 3.2, 0, Math.PI * 2);
+        }
+
+        ctx.stroke();
     });
 }
 
@@ -5513,69 +5950,118 @@ function drawProjectiles() {
 }
 
 /* =========================================================
-   FINISH LINE DRAWING
+   FINISH LINE DRAWING — the goal banner.
+   A stone footing plants the pole on the ground, the pennant waves
+   slowly, and unlocked banners glow with drifting motes so the goal
+   is unmistakable without covering the play area.
 ========================================================= */
 
 function drawFinishLine() {
 
     if (!finishLine) return;
 
-    const locked =
-        currentLevel === 3 &&
-        boss &&
-        boss.alive;
+    const locked = finishLocked();
 
-    ctx.fillStyle =
-        "#543522";
+    const t = window.Art ? Art.FX.t : performance.now() / 16;
 
-    ctx.fillRect(
-        finishLine.x,
-        finishLine.y,
-        7,
-        130
-    );
+    const x = finishLine.x;
+    const groundY = finishLine.y + finishLine.height;
+    const poleTop = groundY - 152;
 
-    /* Flag */
-
-    ctx.fillStyle =
-        locked
-            ? "#777"
-            : "#e55362";
-
+    /* stone footing: the pole visibly rests on the surface */
+    ctx.fillStyle = "#37343f";
     ctx.beginPath();
-
-    ctx.moveTo(
-        finishLine.x + 7,
-        finishLine.y
-    );
-
-    ctx.lineTo(
-        finishLine.x + 80,
-        finishLine.y + 25
-    );
-
-    ctx.lineTo(
-        finishLine.x + 7,
-        finishLine.y + 50
-    );
-
-    ctx.closePath();
-
+    ctx.ellipse(x + 7.5, groundY - 3, 23, 8, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle =
-        "#fff";
+    ctx.fillStyle = "#48444f";
+    ctx.beginPath();
+    ctx.ellipse(x + 7.5, groundY - 7, 13, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-    ctx.font =
-        "bold 14px Arial";
+    /* warm pool of light on the ground (locked banners stay cold) */
+    if (!locked) {
+        const pulse = 0.42 + Math.sin(t / 42) * 0.08;
+        const pool = ctx.createRadialGradient(x + 7.5, groundY - 2, 2, x + 7.5, groundY - 2, 72);
+        pool.addColorStop(0, "rgba(242,184,75," + pulse.toFixed(3) + ")");
+        pool.addColorStop(1, "rgba(242,184,75,0)");
+        ctx.fillStyle = pool;
+        ctx.fillRect(x - 72, groundY - 30, 160, 34);
+    }
 
-    ctx.fillText(
-        locked
-            ? "BOSS"
-            : "FINISH",
-        finishLine.x + 13,
-        finishLine.y + 31
-    );
+    /* pole */
+    ctx.fillStyle = "#543522";
+    ctx.fillRect(x + 4, poleTop, 7, groundY - poleTop);
+
+    ctx.fillStyle = "rgba(255,255,255,.14)";
+    ctx.fillRect(x + 5, poleTop, 2, groundY - poleTop);
+
+    /* finial */
+    ctx.fillStyle = locked ? "#5d5d67" : "#f2b84b";
+    ctx.beginPath();
+    ctx.arc(x + 7.5, poleTop - 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (!locked) {
+        ctx.save();
+        ctx.globalAlpha = 0.5 + Math.sin(t / 30) * 0.15;
+        ctx.fillStyle = "#ffe9b8";
+        ctx.beginPath();
+        ctx.arc(x + 7.5, poleTop - 5, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    /* pennant: a slow wave, different phase along its length */
+    const wave = Math.sin(t / 22 + (finishLine.phase || 0));
+    const wave2 = Math.sin(t / 17 + (finishLine.phase || 0) + 1.3);
+
+    ctx.fillStyle = locked ? "#6d6d78" : "#e55362";
+    ctx.beginPath();
+    ctx.moveTo(x + 11, poleTop + 6);
+    ctx.quadraticCurveTo(x + 42, poleTop + 12 + wave * 3.2, x + 76, poleTop + 20 + wave2 * 4.2);
+    ctx.quadraticCurveTo(x + 52, poleTop + 31 + wave * 3, x + 11, poleTop + 42);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = locked ? "rgba(255,255,255,.16)" : "rgba(255,214,170,.55)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    /* pale soul-mark on the cloth (not colour alone: shape + glyph) */
+    ctx.fillStyle = locked ? "rgba(255,255,255,.14)" : "rgba(255,255,255,.82)";
+    ctx.beginPath();
+    ctx.arc(x + 30, poleTop + 22, 4.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 30, poleTop + 22, 1.8, 0, Math.PI * 2);
+    ctx.fillStyle = locked ? "rgba(120,120,130,.4)" : "#b33345";
+    ctx.fill();
+
+    /* soft halo + rising motes so the banner reads as the goal */
+    if (!locked) {
+        const halo = ctx.createRadialGradient(x + 32, poleTop + 22, 3, x + 32, poleTop + 22, 62);
+        halo.addColorStop(0, "rgba(246,231,174,.20)");
+        halo.addColorStop(1, "rgba(246,231,174,0)");
+        ctx.fillStyle = halo;
+        ctx.fillRect(x - 38, poleTop - 44, 142, 124);
+
+        ctx.fillStyle = "rgba(246,231,174,.65)";
+
+        for (let i = 0; i < 5; i++) {
+            const ph = (t * 0.55 + i * 71 + (finishLine.phase || 0) * 30) % 150;
+            const mx = x + 2 + Math.sin(t / 30 + i * 1.7) * 9 + i * 4;
+            const my = groundY - 8 - ph * 0.92;
+            const ma = Math.max(0, 1 - ph / 150) * 0.75;
+
+            ctx.globalAlpha = ma;
+            ctx.beginPath();
+            ctx.arc(mx, my, 1.7 + (i % 2) * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.globalAlpha = 1;
+    }
 }
 
 /* =========================================================
@@ -5616,6 +6102,7 @@ function vesselState(hero, over) {
         vy: player.vy,
 
         air: !grounded && !player.climbing,
+        climb: player.climbing ? 1 : 0,
 
         dash: player.dashTimer > 0 ? 1 : 0,
         attack: player.attackTimer > 0 ? player.attackTimer / 12 : 0,
@@ -5930,27 +6417,70 @@ function updateAllHUD() {
         if (fill) fill.style.width = pct;
     }
 
+    /* mask pips: filled = current health. The numeric count beside them is
+       the shape-independent cue, so state never relies on colour alone. */
+    const masks = $("hud-masks");
+    if (masks) {
+        const sig = maxHealth + ":" + health;
+        if (hudCache.masks !== sig) {
+            hudCache.masks = sig;
+            const list = masks.querySelectorAll ? masks.querySelectorAll(".hud-mask") : [];
+
+            if (list.length !== maxHealth) {
+                let html = "";
+                for (let i = 0; i < maxHealth; i++) {
+                    html += '<svg class="hud-mask' + (i < health ? "" : " empty") +
+                        '" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-heart"/></svg>';
+                }
+                masks.innerHTML = html;
+            } else {
+                list.forEach((el, i) => el.classList.toggle("empty", i >= health));
+            }
+        }
+    }
+
     /* Low health gets a slow pulse *and* a hollow last pip (never colour alone). */
     const low = health <= 1;
     if (hudCache.healthLow !== low) {
         hudCache.healthLow = low;
         const pill = document.querySelector(".hud-group .hud-pill");
         if (pill) pill.classList.toggle("hud-pip-low", low);
+        const vitals = document.querySelector(".hud-vitals");
+        if (vitals) vitals.classList.toggle("hud-pip-low", low);
     }
 }
 
-let climbShown = null;
+let promptState = null;
 
 function updateHUDGame() {
 
     updateAllHUD();
 
-    const show = isNearLadder() && !player.climbing;
-    if (show === climbShown) return;
-    climbShown = show;
+    /* context prompts: one small chip, only while it is useful */
+    const hints = save.settings.controlHints !== false;
+    let kind = "";
 
-    const msg = $("climb-message");
-    if (msg) msg.classList.toggle("hidden", !show);
+    if (hints && gameRunning && !paused) {
+        if (finishLine && !finishLocked() && nearFinishLine()) kind = "flag";
+        else if (isNearLadder() && !player.climbing) kind = "ladder";
+    }
+
+    if (kind !== promptState) {
+        promptState = kind;
+
+        const msg = $("context-prompt");
+
+        if (msg) {
+            if (kind === "flag") msg.innerHTML = "<kbd>E</kbd> — touch the banner";
+            else if (kind === "ladder") msg.innerHTML = "<kbd>W</kbd>/<kbd>S</kbd> — climb";
+            msg.classList.toggle("hidden", kind === "");
+        }
+    }
+
+    /* objective flips the moment the guardian falls */
+    if (currentLevel === 3 && boss && !boss.alive) {
+        setHud("hud-goal", "Reach the goal banner");
+    }
 }
 
 /* =========================================================
@@ -6022,6 +6552,17 @@ function endLevel(success) {
         save.coins += 50;
 
         saveGame();
+
+        /* restrained celebration: one ring, one soft flash, one chime */
+        const fx = Fx();
+
+        if (fx) {
+            fx.ring(player.x + player.width / 2, player.y + player.height - 8, 16, "#f2b84b");
+            fx.flash("#f2b84b", 0.16, 14);
+            fx.number(player.x + player.width / 2, player.y - 30, "LEVEL COMPLETE", "#f2b84b");
+        }
+
+        Sfx("unlock");
     }
 
     showResult(success);
@@ -6138,11 +6679,17 @@ function initializeGame() {
     updateAllHUD();
 
     updateSettingsButtons();
+    applySettingsClasses();
 
     renderHeroes();
 
     startLoading();
 }
+
+/* Pause the level when the tab hides: no surprise deaths while away. */
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden && gameRunning && !paused) togglePause();
+});
 
 if (
     document.readyState ===

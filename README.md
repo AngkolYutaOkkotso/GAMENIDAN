@@ -17,7 +17,9 @@ js/gachaAnimation.js  cinematic wish canvas animation
 js/ui.js          wish screen, account panel, toasts
 js/metroid.js     "The Hollow Descent" Metroidvania mode (rooms, physics, abilities, combat, boss, map, charms)
 js/metroFx.js     Descent feedback: screen shake, flashes, hit-stop, telegraph assist, sound effects, Options rows
+js/menuNav.js     one menu navigation model (keyboard / mouse / gamepad) + screen wipes
 docs/DESIGN.md    full design doc. Tags show what is built: [BUILT], [STAGE n] (scheduled), [PLANNED]
+docs/POLISH_PLAN.md  the polish pass: before/after audit, UI style guide, controls + ladder logic, testing checklist
 tests/metro.test.js  automated simulation tests for the Descent (node tests/metro.test.js)
 js/scenery.js     particles, fog, lighting, procedural ambient audio
 js/threshold.js   loading + login screen atmosphere (soul motes, moths, parallax, lore lines)
@@ -139,7 +141,7 @@ collision agree, and everything else is presentation.
 ```bash
 npx http-server -p 8080          # then open http://localhost:8080
 open preview/art.html            # art gallery: silhouettes, palettes, props, black-fill test
-node tests/levels.test.js        # Levels + Art Kit smoke test (26 checks)
+node tests/levels.test.js        # Levels + Art Kit smoke test (45 checks)
 node tests/metro.test.js         # Descent physics + art (61 checks)
 node tests/art.test.js           # pixel tests: silhouettes, contrast, tells (18 checks)
 node tools/sheet.js              # re-render preview/sheet-*.png after an art change
@@ -153,6 +155,50 @@ black-fill test); `preview/frame-*.png` are whole frames rendered by the game it
 `preview/art.html` has a **black silhouette test** toggle: fill every creature with one flat
 colour and check that role, threat and facing are still readable. That is the acceptance test
 for the whole art pass.
+
+## Polish pass (menus, HUD, controls, flags)
+
+Design, style guide and the full testing checklist: `docs/POLISH_PLAN.md`. Story, characters,
+levels, physics constants, economy and saves are untouched — everything below is presentation
+and input feel.
+
+**Main menu** — layered living background (soul motes + moths from `threshold.js`, drifting
+fog, vignette), per-letter title entrance, and one clear hierarchy: **Play** (mode select:
+Levels or Descend) → journey (Wish / Vessels) → system (Settings / Controls / Credits / Quit).
+Every button has hover, press and a *selected* state (ring + diamond marker + light bar — never
+colour alone). Transitions are 200–400 ms eased wipes. New screens: **Controls** (the full
+scheme, with keycaps), **Credits**, and a **Quit** confirmation that returns to the Threshold
+(a page cannot close its own tab). **Settings** gains Control hints, Reduce motion and
+High-contrast HUD rows next to the existing audio and Descent accessibility rows.
+
+**Navigation** (`js/menuNav.js`) — one model for keyboard (↑↓/WASD, Enter/Space, Esc), mouse
+hover and gamepad (d-pad/stick, A select, B back). The visible selection is the button a press
+activates, on every screen.
+
+**HUD** — mask pips + soul bar, Geo, a world/level + objective line ("Reach the goal banner"
+→ "Defeat the guardian" on boss levels), pause and map buttons. Damage shakes the HUD, coins
+pulse with a "+10" float, and bottom-centre keycap prompts ("W/S — climb", "E — touch the
+banner") appear only while useful (Control hints toggles them). `Esc` pauses (Resume /
+Restart / World map / Home) and the level auto-pauses when the tab hides.
+
+**Controls (Levels)** — `A`/`D` or arrows move (quick accel, clean decel, coyote time, jump
+buffering, variable jump height), `Space` is *only* jump (and hop-off while climbing),
+`W`/`S` climb ladders with **no jump-first toggle** — walk onto a ladder and press W or S.
+Climbing grips the ladder axis and leaves naturally at the top (onto the platform), at the
+ground, sideways, or via Space; a short re-grab cooldown kills all jitter. `E` touches the
+goal banner when near it and otherwise keeps its special-ability role; `F`/`J` attack,
+`Shift` dash unchanged.
+
+**Flags** — the goal banner is planted on the ground with a stone footing, a waving pennant,
+a soul-mark glyph, a warm pool of light and rising motes; its interaction box ends exactly on
+the surface and touch (or `E`) finishes the level with a restrained gold burst. The floating
+**checkpoint banners** get the same grounding pass (they hung at y = 455 and respawned you in
+mid-air) and lit/unlit states differ by a check-mark vs dot glyph. Boss levels keep the sealed
+grey banner until the guardian falls.
+
+**Feel** — smoothed camera with look-ahead (snaps after respawn), pixel-snapped world
+rendering, ladder grab/hop sounds and dust, landing dust + footsteps kept, and scene wipes
+between menus and gameplay. Reduced-motion (OS or setting) disables entrances and wipes.
 
 ## Deploy on Vercel
 Push the folder to GitHub → import in Vercel → Framework preset **Other**, no build command → Deploy. Then add your Vercel URL to Supabase *Site URL / Redirect URLs*.
@@ -209,7 +255,7 @@ Enemy and boss danger is shown by shape as well as colour, and the Sound toggle 
 ### Testing
 ```bash
 node tests/metro.test.js      # 61 checks: rooms, gates, combat, boss, options, art
-node tests/levels.test.js     # 26 checks: Levels mode + the Art Kit (headless DOM)
+node tests/levels.test.js     # 45 checks: Levels mode + the Art Kit (headless DOM)
 node tests/art.test.js        # 18 checks: real pixels - silhouettes, contrast, tells, cache
 ```
 Runs the real Descent physics headlessly (no browser needed) and prints one PASS/FAIL line per check (56 at the moment). It covers room data, each ability gate (dash chasm, double-jump ledge, wall shaft, Lantern seal, Lumen catch, Moth Wing and Wall Claw ledge, brittle column, dive shockwave, Bell Hook latch/release/wall stop), combat, the Warden fight, the options, save normalisation, and a random-input fuzz in every room with all abilities. When you add a room or ability, add a check next to the related block, run the file, then commit. Visual changes (art, seals, map) still need a quick look in a browser.
