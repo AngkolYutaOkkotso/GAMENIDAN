@@ -8,6 +8,32 @@ const $ = id => document.getElementById(id);
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
+/* =========================================================
+   FEEDBACK GLUE
+   One place that talks to the Art Kit's effect bus (js/art.js) and to the
+   procedural sounds (js/metroFx.js). Every call is gated by the player's
+   accessibility rows, so nothing here can ignore a setting.
+   ========================================================= */
+
+function Sfx(name) {
+    if (typeof MetroFx !== "undefined" && MetroFx.play) MetroFx.play(name);
+}
+
+/* Small screen-space HUD reaction (used for damage and coin pickups). */
+function pulseHud(cls) {
+    if (typeof document === "undefined") return;
+    const el = document.querySelector(".game-hud");
+    if (!el) return;
+    el.classList.remove("hud-hit", "hud-coin");
+    void el.offsetWidth;                 // restart the CSS animation
+    el.classList.add(cls);
+}
+
+/* Wrapped so a missing art.js (old cached page) can never break the game. */
+function Fx() {
+    return (typeof window !== "undefined" && window.Art) ? window.Art.FX : null;
+}
+
 /* Small toast notification (shared with ui.js). Replaces blocking alert()
    so gameplay / menus are never interrupted. */
 function notify(msg) {
@@ -890,6 +916,7 @@ let hazards = [];
 let particles = [];
 let projectiles = [];
 let checkpoints = [];
+let props = [];                       // living ground detail (see js/art.js)
 
 let finishLine = null;
 let boss = null;
@@ -949,7 +976,13 @@ const player = {
     checkpointX: 100,
     checkpointY: 300,
 
-    shield: false
+    shield: false,
+
+    /* ---- presentation state only (see drawPlayer / Art.drawVessel) ---- */
+    squash: 0,
+    wasAir: false,
+    shadowY: 364,
+    stepT: 0
 };
 
 /* =========================================================
@@ -1261,6 +1294,79 @@ function createLevel() {
         width: 80,
         height: 130
     };
+
+    /* -------------------------
+       LIVING DETAIL
+       Deterministic, cheap ground detail (swaying grass, ash reeds, ice
+       spikes, hanging chains...). It is placed before hazards are known to
+       be clear, never taller than one tile, and never over a coin row.
+    ------------------------- */
+
+    props = [];
+
+    let seed = 1337 + currentWorld * 977 + currentLevel * 131;
+
+    const rand = n => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return (seed / 0x7fffffff) * n;
+    };
+
+    const kinds = WORLD_PROPS[currentWorld] || ["pebble"];
+
+    const clearOfHazards = x =>
+        !hazards.some(
+            h => x > h.x - 46 && x < h.x + h.width + 46
+        );
+
+    platforms.forEach(platform => {
+
+        const count =
+            platform.type === "ground"
+                ? Math.max(8, Math.floor(platform.width / 210))
+                : 3;
+
+        const span = Math.max(30, platform.width - 60);
+
+        for (let i = 0; i < count; i++) {
+
+            const x = platform.x + 30 + rand(span);
+
+            if (!clearOfHazards(x)) continue;
+
+            props.push({
+                kind: kinds[(rand(97) | 0) % kinds.length],
+                x: x,
+                y: platform.y + 2,
+                seed: rand(1) * 10,
+                world: currentWorld
+            });
+        }
+    });
+}
+
+/* Per-world prop palette: one material idea per zone (see docs/ART_DIRECTION.md) */
+const WORLD_PROPS = [
+    ["pebble", "mushroom", "grass"],          // Forgotten Crossroads
+    ["grass", "mushroom", "spore"],           // Mossy Greenpath
+    ["crystal", "pebble", "spore"],           // Crystal Depths
+    ["chain", "pebble", "grass"],             // City of Rain
+    ["reed", "pebble"],                       // Ashen Basin
+    ["ice", "pebble"],                        // Pale Peaks
+    ["rib", "pebble", "crystal"]              // Hollow Castle
+];
+
+function drawProps() {
+
+    if (!window.Art || !props.length) return;
+
+    const t = Art.FX.t;
+
+    props.forEach(prop => {
+
+        if (prop.x < cameraX - 60 || prop.x > cameraX + window.innerWidth + 60) return;
+
+        Art.prop(ctx, prop.kind, prop.x, prop.y, prop.seed, t, prop.world);
+    });
 }
 
 /* =========================================================
@@ -1308,7 +1414,15 @@ function createEnemy(type, x, difficulty) {
 
         shootTimer:
             100 +
-            Math.random() * 100
+            Math.random() * 100,
+
+        /* ---- presentation state only; nothing here changes gameplay ---- */
+        vy: 0,
+        animT: Math.random() * 60,
+        hitFlash: 0,
+        windup: 0,
+        alert: false,
+        deathT: 0
     };
 
     switch (type) {
@@ -1443,6 +1557,11 @@ function createEnemy(type, x, difficulty) {
             break;
     }
 
+    /* The art anchors to the feet, so hitbox and drawing finally agree:
+       every ground mob stands on the ground line at y = 520. */
+    base.groundY = 520 - base.height;
+    base.y = base.groundY;
+
     return base;
 }
 
@@ -1534,7 +1653,7 @@ function createBoss(type) {
         name: data.name,
 
         x: levelWidth - 800,
-        y: 360,
+        y: 520 - data.height,        // feet on the ground line (used to float at 360)
 
         width: data.width,
         height: data.height,
@@ -1670,6 +1789,10 @@ function handleSpace() {
             player.x + 20,
             player.y + player.height
         );
+
+        /* take-off: a little stretch, dust and a sound */
+        player.squash = -0.12;
+        Sfx("jump");
     }
 }
 
@@ -1720,6 +1843,14 @@ function dash() {
             "dash"
         );
     }
+
+    Sfx("dash");
+
+    const fx = Fx();
+    if (fx) {
+        fx.addShake(1.3);
+        fx.ring(player.x + player.width / 2, player.y + player.height - 6, 10, "rgba(232,237,243,.55)");
+    }
 }
 
 /* =========================================================
@@ -1759,6 +1890,11 @@ function attack() {
     });
 
     createAttackParticles();
+
+    Sfx("swing");
+
+    const fx = Fx();
+    if (fx) fx.addShake(0.7);
 }
 
 /* =========================================================
@@ -1778,9 +1914,40 @@ function damageEnemy(enemy, amount) {
             enemy.height / 2
     );
 
+    /* ---- hit reaction: flash, knockback, number, hit-stop, shake ---- */
+    const boss = enemy.type === "boss";
+
+    enemy.hitFlash = 1;
+    enemy.windup = 0;
+
+    const away =
+        (enemy.x + enemy.width / 2) <
+            (player.x + player.width / 2) ? -1 : 1;
+
+    enemy.x += away * (boss ? 1.5 : 4);
+
+    const fx = Fx();
+
+    if (fx) {
+
+        fx.number(
+            enemy.x + enemy.width / 2,
+            enemy.y - 8,
+            "-" + amount,
+            boss ? "#ff8a8a" : "#ffd9a8"
+        );
+
+        fx.addShake(boss ? 4 : 2.2);
+        fx.freeze(boss ? 6 : 3);
+        fx.ring(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, 6, "#e8edf3");
+    }
+
+    Sfx("hit");
+
     if (enemy.health <= 0) {
 
         enemy.alive = false;
+        enemy.deathT = boss ? 60 : 34;      // the death animation plays first
 
         const reward =
             enemy.type === "boss"
@@ -1799,6 +1966,17 @@ function damageEnemy(enemy, amount) {
         );
 
         updateAllHUD();
+
+        if (fx) {
+
+            fx.freeze(boss ? 12 : 5);
+            fx.addShake(boss ? 6 : 3);
+            fx.number(enemy.x + enemy.width / 2, enemy.y - 24, "+" + reward + " ◈", "#8fc1e3");
+            fx.ring(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, 12, "#f2b84b");
+            if (boss) fx.flash("#f2b84b", 0.3, 20);
+        }
+
+        Sfx(boss ? "bigdeath" : "kill");
 
         if (enemy.type === "boss") {
             createParticle(
@@ -1822,6 +2000,14 @@ function useSpecial() {
 
     player.specialCooldown = 110;
     player.abilityTimer = 30;
+
+    Sfx("unlock");
+
+    const fx = Fx();
+    if (fx) {
+        fx.addShake(2.2);
+        fx.ring(player.x + player.width / 2, player.y + player.height - 10, 12, "#f2b84b");
+    }
 
     const hero =
         heroes.find(
@@ -2102,6 +2288,19 @@ function damagePlayer(amount = 1) {
         player.y
     );
 
+    /* ---- damage feedback: red vignette, shake, hit-stop, HUD pulse ---- */
+    const fx = Fx();
+
+    if (fx) {
+        fx.flash("#ff5a5a", 0.2, 14, 0.9);
+        fx.addShake(4);
+        fx.freeze(4);
+        fx.number(player.x + player.width / 2, player.y + 6, "-" + amount, "#ff8a8a");
+    }
+
+    Sfx("hurt");
+    pulseHud("hud-hit");
+
     updateAllHUD();
 
     if (health <= 0) {
@@ -2116,6 +2315,14 @@ function damagePlayer(amount = 1) {
 function updateGame() {
 
     if (!gameRunning) return;
+
+    const fx = Fx();
+    if (fx) fx.step();
+
+    /* Hit-stop: the world holds for a few frames on a big impact. Attacks,
+       dashes and jumps fire straight from the keydown handler, so queued
+       input is never swallowed by the freeze. */
+    if (fx && fx.frozen()) return;
 
     updatePlayer();
     updateEnemies();
@@ -2226,6 +2433,8 @@ function updatePlayer() {
 
     /* Platform collision */
 
+    const fallSpeed = player.vy;          // remembered for landing feedback
+
     player.grounded = false;
 
     platforms.forEach(platform => {
@@ -2266,6 +2475,47 @@ function updatePlayer() {
             player.grounded = true;
         }
     });
+
+    /* ---- landing: dust ring, squash, sound (weight without any delay) ---- */
+
+    if (player.grounded && player.wasAir) {
+
+        player.squash = Math.min(0.28, 0.12 + Math.abs(fallSpeed) * 0.013);
+        player.shadowY = player.y + player.height;
+
+        createDust(
+            player.x + player.width / 2,
+            player.y + player.height
+        );
+
+        const fx = Fx();
+
+        if (fx) {
+            fx.ring(player.x + player.width / 2, player.y + player.height, 9, "rgba(232,237,243,.5)");
+            if (Math.abs(fallSpeed) > 7) fx.addShake(1.4);
+        }
+
+        Sfx("land");
+    }
+
+    if (player.grounded) player.shadowY = player.y + player.height;
+
+    /* footsteps: a small puff every 16 frames of running */
+    if (player.grounded && Math.abs(player.vx) > 1.5) {
+
+        player.stepT = (player.stepT || 0) + 1;
+
+        if (player.stepT % 16 === 0) {
+            createParticle(
+                player.x + player.width / 2 - Math.sign(player.vx) * 8,
+                player.y + player.height - 2,
+                "dust"
+            );
+        }
+    }
+
+    player.wasAir = !player.grounded;
+    player.squash = Math.max(0, player.squash - 0.045);
 
     /* Ceiling */
 
@@ -2317,11 +2567,27 @@ function updatePlayer() {
    ENEMY UPDATE
 ========================================================= */
 
+/* frames the "noticed you" cue stays on screen (art only) */
+const NOTICE_FRAMES = 26;
+
 function updateEnemies() {
 
     enemies.forEach(enemy => {
 
-        if (!enemy.alive) return;
+        if (!enemy.alive) {
+            if (enemy.deathT > 0) enemy.deathT--;      // the death animation plays out
+            return;
+        }
+
+        /* ---- presentation state (art only) ---- */
+        enemy.animT = (enemy.animT || 0) + 1;
+        if (enemy.hitFlash > 0) enemy.hitFlash = Math.max(0, enemy.hitFlash - 0.08);
+        if (enemy.windup > 0) enemy.windup = Math.max(0, enemy.windup - 0.07);
+
+        const noticed = Math.abs(player.x - enemy.x) < 320;
+        if (noticed && !enemy.alert) enemy.noticeT = NOTICE_FRAMES;   // "it saw you" tell
+        enemy.alert = noticed;
+        if (enemy.noticeT > 0) enemy.noticeT--;
 
         if (enemy.frozen > 0) {
             enemy.frozen--;
@@ -2389,6 +2655,18 @@ function updateEnemies() {
 
             enemy.shootTimer--;
 
+            /* Attack tell: the pod swells and glows for ~26 frames first. */
+            if (
+                enemy.shootTimer > 0 &&
+                enemy.shootTimer < 26 &&
+                Math.abs(enemy.x - player.x) < 600
+            ) {
+                enemy.windup = Math.max(
+                    enemy.windup,
+                    1 - enemy.shootTimer / 26
+                );
+            }
+
             if (
                 enemy.shootTimer <= 0 &&
                 Math.abs(
@@ -2434,6 +2712,14 @@ function updateEnemies() {
 
             enemy.jumpTimer--;
 
+            /* Attack tell: the crouch before the pounce. */
+            if (enemy.jumpTimer > 0 && enemy.jumpTimer < 22) {
+                enemy.windup = Math.max(
+                    enemy.windup,
+                    1 - enemy.jumpTimer / 22
+                );
+            }
+
             if (
                 enemy.jumpTimer <= 0
             ) {
@@ -2452,8 +2738,13 @@ function updateEnemies() {
             enemy.vy += 0.5;
             enemy.y += enemy.vy;
 
-            if (enemy.y > 460) {
-                enemy.y = 460;
+            const floorY =
+                enemy.groundY !== undefined
+                    ? enemy.groundY
+                    : 460;
+
+            if (enemy.y > floorY) {
+                enemy.y = floorY;
                 enemy.vy = 0;
             }
         }
@@ -2869,6 +3160,12 @@ function updateCoins() {
                 coin.y
             );
 
+            const fx = Fx();
+            if (fx) fx.number(coin.x, coin.y - 10, "+10 ◈", "#8fc1e3");
+
+            Sfx("pickup");
+            pulseHud("hud-coin");
+
             updateAllHUD();
         }
     });
@@ -2901,6 +3198,18 @@ function updateCheckpoints() {
                 checkpoint.y - 30,
                 "✓"
             );
+
+            /* the beacon ignites: a gold ring + a warm flash of the world */
+            const fx = Fx();
+
+            if (fx) {
+                fx.ring(checkpoint.x, checkpoint.y + 10, 14, "#f2b84b");
+                fx.flash("#f2b84b", 0.16, 12);
+                fx.addShake(1.6);
+                fx.number(checkpoint.x, checkpoint.y - 40, "CHECKPOINT", "#f2b84b");
+            }
+
+            Sfx("unlock");
         }
     });
 }
@@ -3346,13 +3655,17 @@ function drawGame() {
 
     ctx.save();
 
+    /* camera shake moves the world, never the HUD or the menus */
+    const fx = Fx();
+
     ctx.translate(
-        -cameraX,
-        0
+        -cameraX + (fx ? Math.round(fx.sx) : 0),
+        fx ? Math.round(fx.sy) : 0
     );
 
     drawHazards();
     drawPlatforms();
+    drawProps();
     drawLadders();
     drawCheckpoints();
     drawCoins();
@@ -3364,10 +3677,16 @@ function drawGame() {
 
     drawParticles();
 
+    /* floating damage numbers and shockwave rings live in world space */
+    if (fx) fx.drawWorld(ctx);
+
     ctx.restore();
 
     /* atmosphere: fog, particles, dynamic lighting (js/scenery.js) */
     if (window.Scenery) Scenery.draw(ctx, { cameraX, world: currentWorld, player });
+
+    /* screen-space feedback: damage vignette and (optional) flashes */
+    if (fx) fx.drawScreen(ctx, width, height);
 
     drawBossBar();
 }
@@ -4513,8 +4832,13 @@ function drawEnemies() {
     enemies.forEach(enemy => {
         if (enemy.x + 400 < cameraX || enemy.x - 400 > cameraX + window.innerWidth) return;
 
+        if (!enemy.alive) {
 
-        if (!enemy.alive) return;
+            /* let the death animation finish before the mob disappears */
+            if (enemy.deathT > 0) drawEnemy(enemy);
+
+            return;
+        }
 
         if (enemy.type === "boss") {
             drawBoss(enemy);
@@ -4530,562 +4854,106 @@ function drawEnemies() {
    NORMAL ENEMY DRAWING
 ========================================================= */
 
+/* =========================================================
+   NORMAL ENEMY DRAWING
+   One call into the Art Kit (js/art.js): role silhouette, idle breath,
+   walk cycle, attack tell, hit flash and death animation all come from
+   there, so the Levels mode and the Descent draw the same creatures.
+   ========================================================= */
+
 function drawEnemy(enemy) {
 
-    ctx.save();
+    if (!window.Art || !Art.drawMob) return;
 
-    const x = enemy.x;
-    const y = enemy.y;
+    const dying = !enemy.alive;
 
-    const bob = enemy.flying
-        ? Math.sin(enemy.phase) * 5
-        : 0;
+    const fade = dying
+        ? Math.max(0, (enemy.deathT || 0) / 34)
+        : 1;
 
-    ctx.translate(
-        x,
-        y + bob
-    );
+    const t = enemy.animT || 0;
 
+    Art.drawMob(ctx, enemy.type, {
 
-    /* =========================
-       SHADOW
-    ========================= */
+        x: enemy.x,
+        feet: enemy.y + enemy.height,          // hitbox and art share the feet line
+        w: enemy.width,
+        h: enemy.height,
 
-    if (!enemy.flying) {
+        face: enemy.vx >= 0 ? 1 : -1,
 
-        ctx.fillStyle = "rgba(0,0,0,.25)";
+        t: t,
+        walk: t * (enemy.flying ? 0.17 : 0.12),
+        seed: enemy.phase || 0,
 
-        ctx.beginPath();
+        ground: !enemy.flying,                 // no contact shadow for flyers
+        alert: !!enemy.alert,                  // warm eye once it has noticed you
+        notice: (enemy.noticeT || 0) / NOTICE_FRAMES,   // short "!" pop on first contact
+        windup: enemy.windup || 0,             // shape-coded attack tell
+        flash: enemy.hitFlash > 0 ? Math.min(0.85, enemy.hitFlash) : 0,
 
-        ctx.ellipse(
-            enemy.width / 2,
-            enemy.height + 4,
-            enemy.width / 2,
-            7,
-            0,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.fill();
-    }
-
-
-    /* =========================
-       ENEMY COLORS
-    ========================= */
-
-    let bodyColor = "#7b6a9e";
-
-    switch (enemy.type) {
-
-        case "slime":
-            bodyColor = "#67c75a";
-            break;
-
-        case "beetle":
-            bodyColor = "#473d63";
-            break;
-
-        case "mushling":
-            bodyColor = "#c95662";
-            break;
-
-        case "wolf":
-            bodyColor = "#66706f";
-            break;
-
-        case "thorn":
-            bodyColor = "#4d9a55";
-            break;
-
-        case "forestSpirit":
-            bodyColor = "#75c47b";
-            break;
-
-        case "bat":
-            bodyColor = "#8068a8";
-            break;
-
-        case "rockCrawler":
-            bodyColor = "#72717d";
-            break;
-
-        case "crystalBug":
-            bodyColor = "#52c4da";
-            break;
-
-        case "cloudSpirit":
-            bodyColor = "#f4f7ff";
-            break;
-
-        case "stormBird":
-            bodyColor = "#7164bc";
-            break;
-
-        case "skyEye":
-            bodyColor = "#d65d78";
-            break;
-
-        case "lavaSlime":
-            bodyColor = "#ef5b2f";
-            break;
-
-        case "fireBat":
-            bodyColor = "#d94e30";
-            break;
-
-        case "magmaBeast":
-            bodyColor = "#71352c";
-            break;
-
-        case "iceWolf":
-            bodyColor = "#86c5dd";
-            break;
-
-        case "frostBat":
-            bodyColor = "#72a9d4";
-            break;
-
-        case "iceGolem":
-            bodyColor = "#7dc7d9";
-            break;
-
-        case "darkMushroom":
-            bodyColor = "#733d67";
-            break;
-
-        case "knight":
-            bodyColor = "#59616e";
-            break;
-
-        case "magicGuardian":
-            bodyColor = "#8a5ed1";
-            break;
-    }
-
-
-    /* =========================
-       WINGS FOR FLYING ENEMIES
-    ========================= */
-
-    if (enemy.flying) {
-
-        ctx.fillStyle = bodyColor;
-
-        /* Left wing */
-
-        ctx.beginPath();
-
-        ctx.ellipse(
-            3,
-            25,
-            18,
-            12,
-            -0.4,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.fill();
-
-
-        /* Right wing */
-
-        ctx.beginPath();
-
-        ctx.ellipse(
-            enemy.width - 3,
-            25,
-            18,
-            12,
-            0.4,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.fill();
-    }
-
-
-    /* =========================
-       MAIN BODY
-    ========================= */
-
-    ctx.fillStyle = bodyColor;
-
-    ctx.beginPath();
-
-    ctx.roundRect(
-        5,
-        8,
-        enemy.width - 10,
-        enemy.height - 8,
-        12
-    );
-
-    ctx.fill();
-
-
-    /* =========================
-       BODY HIGHLIGHT
-    ========================= */
-
-    ctx.fillStyle = "rgba(255,255,255,.16)";
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-        enemy.width * 0.35,
-        16,
-        8,
-        5,
-        -0.4,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-
-    /* =========================
-       TYPE DETAILS
-    ========================= */
-
-    /* Slime */
-
-    if (
-        enemy.type === "slime" ||
-        enemy.type === "lavaSlime"
-    ) {
-
-        ctx.fillStyle = "rgba(255,255,255,.22)";
-
-        ctx.beginPath();
-
-        ctx.arc(
-            enemy.width * 0.30,
-            14,
-            4,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.fill();
-    }
-
-
-    /* Beetle */
-
-    if (enemy.type === "beetle") {
-
-        ctx.strokeStyle = "#241f35";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            enemy.width / 2,
-            12
-        );
-
-        ctx.lineTo(
-            enemy.width / 2,
-            enemy.height - 5
-        );
-
-        ctx.stroke();
-    }
-
-
-    /* Wolf */
-
-    if (
-        enemy.type === "wolf" ||
-        enemy.type === "iceWolf"
-    ) {
-
-        ctx.fillStyle = bodyColor;
-
-        /* Ears */
-
-        ctx.beginPath();
-
-        ctx.moveTo(8, 14);
-        ctx.lineTo(14, 2);
-        ctx.lineTo(20, 14);
-
-        ctx.fill();
-
-        ctx.beginPath();
-
-        ctx.moveTo(enemy.width - 20, 14);
-        ctx.lineTo(enemy.width - 14, 2);
-        ctx.lineTo(enemy.width - 8, 14);
-
-        ctx.fill();
-    }
-
-
-    /* Thorn */
-
-    if (enemy.type === "thorn") {
-
-        ctx.fillStyle = "#d7f07b";
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            enemy.width / 2,
-            3
-        );
-
-        ctx.lineTo(
-            enemy.width / 2 + 5,
-            14
-        );
-
-        ctx.lineTo(
-            enemy.width / 2 - 5,
-            14
-        );
-
-        ctx.closePath();
-
-        ctx.fill();
-    }
-
-
-    /* Crystal Bug */
-
-    if (enemy.type === "crystalBug") {
-
-        ctx.fillStyle = "#c8f8ff";
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            enemy.width / 2,
-            5
-        );
-
-        ctx.lineTo(
-            enemy.width / 2 + 7,
-            17
-        );
-
-        ctx.lineTo(
-            enemy.width / 2,
-            25
-        );
-
-        ctx.lineTo(
-            enemy.width / 2 - 7,
-            17
-        );
-
-        ctx.closePath();
-
-        ctx.fill();
-    }
-
-
-    /* =========================
-       EYES
-    ========================= */
-
-    const eyeY = 18;
-
-    /* White eyes */
-
-    ctx.fillStyle = "#fff";
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-        enemy.width * 0.30,
-        eyeY,
-        6,
-        7,
-        0,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-        enemy.width * 0.64,
-        eyeY,
-        6,
-        7,
-        0,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-
-    /* Pupils */
-
-    ctx.fillStyle = "#241a1a";
-
-    ctx.beginPath();
-
-    ctx.arc(
-        enemy.width * 0.31,
-        eyeY + 1,
-        3,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.beginPath();
-
-    ctx.arc(
-        enemy.width * 0.65,
-        eyeY + 1,
-        3,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-
-    /* =========================
-       CUTE MOUTH
-    ========================= */
-
-    ctx.strokeStyle = "#241a1a";
-    ctx.lineWidth = 2;
-
-    ctx.beginPath();
-
-    ctx.arc(
-        enemy.width / 2,
-        31,
-        5,
-        0,
-        Math.PI
-    );
-
-    ctx.stroke();
-
-
-    /* =========================
-       LITTLE FEET
-    ========================= */
-
-    ctx.fillStyle = "#302327";
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-        enemy.width * 0.28,
-        enemy.height - 2,
-        9,
-        5,
-        0,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-        enemy.width * 0.72,
-        enemy.height - 2,
-        9,
-        5,
-        0,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
+        alpha: fade,
+        squash: dying ? (1 - fade) * 0.32 : 0
+    });
 
     /* =========================
        HEALTH BAR
+       Only after the first hit, so untouched mobs stay clean.
     ========================= */
 
-    if (enemy.maxHealth > 1) {
+    if (!dying && enemy.maxHealth > 1 && enemy.health < enemy.maxHealth) {
 
-        const barWidth = enemy.width;
+        const barWidth = Math.max(30, enemy.width);
+        const bx = enemy.x + (enemy.width - barWidth) / 2;
+        const by = enemy.y - 13;
 
-        ctx.fillStyle = "#2c2220";
+        ctx.save();
 
-        ctx.fillRect(
-            0,
-            -10,
-            barWidth,
-            5
-        );
+        ctx.fillStyle = "rgba(11,14,22,.85)";
+        ctx.fillRect(bx - 1, by - 1, barWidth + 2, 7);
 
         ctx.fillStyle = "#e65b59";
-
         ctx.fillRect(
-            0,
-            -10,
-            barWidth *
-            Math.max(
-                0,
-                Math.min(
-                    1,
-                    enemy.health / enemy.maxHealth
-                )
-            ),
+            bx,
+            by,
+            barWidth * clamp(enemy.health / enemy.maxHealth, 0, 1),
             5
         );
+
+        ctx.strokeStyle = "rgba(232,237,243,.35)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx - 1.5, by - 1.5, barWidth + 3, 8);
+
+        ctx.restore();
     }
 
-
     /* =========================
-       FROZEN EFFECT
+       FROZEN EFFECT (shape-coded: an ice cage)
     ========================= */
 
     if (enemy.frozen > 0) {
 
-        ctx.strokeStyle = "#9eeeff";
+        ctx.save();
+
+        ctx.strokeStyle = "rgba(158,238,255,.9)";
         ctx.lineWidth = 3;
 
-        ctx.strokeRect(
-            -5,
-            -5,
-            enemy.width + 10,
-            enemy.height + 10
+        ctx.beginPath();
+        ctx.roundRect(
+            enemy.x - 4,
+            enemy.y - 4,
+            enemy.width + 8,
+            enemy.height + 8,
+            6
         );
-
-
-        /* Ice sparkles */
+        ctx.stroke();
 
         ctx.fillStyle = "#ffffff";
+        ctx.fillRect(enemy.x - 6, enemy.y + 8, 4, 4);
+        ctx.fillRect(enemy.x + enemy.width + 2, enemy.y + enemy.height - 12, 4, 4);
 
-        ctx.fillRect(
-            -7,
-            10,
-            4,
-            4
-        );
-
-        ctx.fillRect(
-            enemy.width + 3,
-            25,
-            4,
-            4
-        );
+        ctx.restore();
     }
-
-
-    ctx.restore();
 }
 
 
@@ -5714,665 +5582,110 @@ function drawFinishLine() {
    PLAYER DRAWING
 ========================================================= */
 
+/* =========================================================
+   PLAYER DRAWING  (Milo, the Lantern Vessel)
+   The same renderer the Descent uses (Art.drawVessel), so Milo looks like
+   one character in every mode: wide moth cap + antennae, teardrop cloak
+   with a split hem, and a lantern held forward - the three cues that keep
+   the silhouette readable as a solid black shape and that show facing
+   even at dash speed.
+   ========================================================= */
+
+/* Everything the renderer needs, derived from the live player object. */
+function vesselState(hero, over) {
+
+    const grounded = player.grounded && !player.climbing;
+    const walking = grounded && Math.abs(player.vx) > 0.5;
+
+    const base = {
+
+        hero: hero,
+
+        x: player.x,
+        y: player.y,
+        w: player.width,
+        h: player.height,
+
+        face: player.direction,
+
+        /* one shared clock for breath, blink and lantern flicker */
+        t: window.Art ? Art.FX.t : 0,
+
+        walk: walking ? player.animation * 2.2 : 0,
+        vx: player.vx,
+        vy: player.vy,
+
+        air: !grounded && !player.climbing,
+
+        dash: player.dashTimer > 0 ? 1 : 0,
+        attack: player.attackTimer > 0 ? player.attackTimer / 12 : 0,
+        hurt: player.hurtTimer > 0 ? Math.min(1, player.hurtTimer / 14) : 0,
+
+        heal: hero.id === "mimi" && player.abilityTimer > 0 ? 0.7 : 0,
+
+        /* every Vessel blinks on its own rhythm */
+        blink: window.Art ? ((Art.FX.t + hero.id.charCodeAt(0) * 3) % 235) < 5 : false,
+
+        squash: player.squash || 0,
+        groundY: player.shadowY || (player.y + player.height)
+    };
+
+    return Object.assign(base, over || {});
+}
+
 function drawPlayer() {
 
+    if (!window.Art || !Art.drawVessel) return;
+
     const hero =
-        heroes.find(
-            h =>
-                h.id ===
-                save.selectedHero
-        ) || heroes[0];
+        heroes.find(h => h.id === save.selectedHero) || heroes[0];
 
-    const x = player.x;
-    const y = player.y;
+    /* Dash after-images: three ghosts trailing the player, fading out. */
+    if (player.dashTimer > 0) {
 
-    ctx.save();
+        for (let i = 1; i <= 3; i++) {
 
-    ctx.translate(
-        x,
-        y
-    );
+            ctx.save();
+            ctx.globalAlpha = 0.26 * (1 - i / 4) * (player.dashTimer / 12);
 
-    if (
-        player.direction === -1
-    ) {
-        ctx.translate(
-            player.width,
-            0
-        );
+            Art.drawVessel(ctx, vesselState(hero, {
+                x: player.x - player.direction * i * 13,
+                dash: 0,
+                simple: true
+            }));
 
-        ctx.scale(
-            -1,
-            1
-        );
+            ctx.restore();
+        }
     }
 
-    /* Blink */
-
-    if (
+    /* Invulnerability blink, kept from the original: the player must always
+       see that the hit registered and that i-frames are running. */
+    const blinking =
         player.invincible > 0 &&
-        Math.floor(
-            player.invincible / 5
-        ) % 2 === 0
-    ) {
-
-        ctx.globalAlpha = 0.55;
-    }
-
-    const moving =
-        Math.abs(
-            player.vx
-        ) > 0.5;
-
-    const walking =
-        moving &&
-        player.grounded &&
-        !player.climbing;
-
-    const walk =
-        walking
-            ? Math.sin(
-                player.animation *
-                2.5
-            ) * 5
-            : 0;
-
-    const jump =
-        !player.grounded &&
-        !player.climbing;
-
-    const bob =
-        walking
-            ? Math.abs(walk) * 0.25
-            : Math.sin(
-                player.animation
-            ) * 0.5;
-
-    /* Shadow */
-
-    ctx.fillStyle =
-        "rgba(0,0,0,.25)";
-
-    ctx.beginPath();
-
-    ctx.ellipse(
-        22,
-        63,
-        18,
-        5,
-        0,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    /* -------------------------
-       LEGS
-    ------------------------- */
-
-    ctx.fillStyle =
-        "#493226";
-
-    const leftLeg =
-        walking
-            ? walk
-            : 0;
-
-    const rightLeg =
-        walking
-            ? -walk
-            : 0;
-
-    ctx.fillRect(
-        9 + leftLeg,
-        45,
-        10,
-        18
-    );
-
-    ctx.fillRect(
-        27 + rightLeg,
-        45,
-        10,
-        18
-    );
-
-    /* Boots */
-
-    ctx.fillStyle =
-        "#2f2524";
-
-    ctx.fillRect(
-        5 + leftLeg,
-        58,
-        16,
-        7
-    );
-
-    ctx.fillRect(
-        25 + rightLeg,
-        58,
-        16,
-        7
-    );
-
-    /* -------------------------
-       BODY
-    ------------------------- */
-
-    ctx.fillStyle =
-        hero.color;
-
-    ctx.beginPath();
-
-    ctx.roundRect(
-        7,
-        27 + bob,
-        31,
-        24,
-        7
-    );
-
-    ctx.fill();
-
-    /* Clothes */
-
-    ctx.fillStyle =
-        hero.secondary;
-
-    ctx.fillRect(
-        9,
-        42 + bob,
-        27,
-        7
-    );
-
-    /* -------------------------
-       ARMS
-    ------------------------- */
-
-    let armAngle = 0;
-
-    if (
-        player.attackTimer > 0
-    ) {
-
-        armAngle =
-            player.attackTimer >
-            6
-                ? -0.8
-                : 0.8;
-    }
+        Math.floor(player.invincible / 5) % 2 === 0;
 
     ctx.save();
+    if (blinking) ctx.globalAlpha = 0.62;
 
-    ctx.translate(
-        8,
-        31 + bob
-    );
-
-    ctx.rotate(
-        -armAngle
-    );
-
-    ctx.fillStyle =
-        hero.color;
-
-    ctx.fillRect(
-        -8,
-        0,
-        10,
-        22
-    );
+    Art.drawVessel(ctx, vesselState(hero));
 
     ctx.restore();
 
-    ctx.save();
+    /* Jump arc: a short motion streak under the feet while moving fast. */
+    if (!player.grounded && !player.climbing && Math.abs(player.vy) > 9) {
 
-    ctx.translate(
-        37,
-        31 + bob
-    );
-
-    ctx.rotate(
-        armAngle
-    );
-
-    ctx.fillStyle =
-        hero.color;
-
-    ctx.fillRect(
-        -2,
-        0,
-        10,
-        22
-    );
-
-    ctx.restore();
-
-    /* -------------------------
-       HEAD
-    ------------------------- */
-
-    ctx.fillStyle =
-        "#f4cfae";
-
-    ctx.fillRect(
-        8,
-        12 + bob,
-        28,
-        25
-    );
-
-    /* Ears */
-
-    ctx.fillRect(
-        4,
-        20 + bob,
-        7,
-        10
-    );
-
-    ctx.fillRect(
-        33,
-        20 + bob,
-        7,
-        10
-    );
-
-    /* -------------------------
-       MUSHROOM CAP
-    ------------------------- */
-
-    ctx.fillStyle =
-        hero.color;
-
-    ctx.beginPath();
-
-    ctx.arc(
-        22,
-        15 + bob,
-        23,
-        Math.PI,
-        0
-    );
-
-    ctx.fill();
-
-    ctx.fillRect(
-        0,
-        13 + bob,
-        44,
-        10
-    );
-
-    /* Cap spots */
-
-    ctx.fillStyle =
-        "#fff1dc";
-
-    ctx.beginPath();
-
-    ctx.arc(
-        12,
-        7 + bob,
-        5,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.arc(
-        30,
-        10 + bob,
-        5,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    /* -------------------------
-       FACE
-    ------------------------- */
-
-    ctx.fillStyle =
-        "#241a19";
-
-    ctx.fillRect(
-        14,
-        21 + bob,
-        4,
-        6
-    );
-
-    ctx.fillRect(
-        27,
-        21 + bob,
-        4,
-        6
-    );
-
-    /* Smile */
-
-    ctx.strokeStyle =
-        "#6b3931";
-
-    ctx.lineWidth = 2;
-
-    ctx.beginPath();
-
-    ctx.arc(
-        22,
-        27 + bob,
-        5,
-        0,
-        Math.PI
-    );
-
-    ctx.stroke();
-
-    /* -------------------------
-       HERO ACCESSORIES
-    ------------------------- */
-
-    drawHeroAccessory(
-        hero,
-        bob
-    );
-
-    /* -------------------------
-       JUMP EFFECT
-    ------------------------- */
-
-    if (jump) {
-
-        ctx.strokeStyle =
-            hero.color;
-
-        ctx.lineWidth = 3;
-
+        ctx.save();
+        ctx.globalAlpha = 0.28;
+        ctx.strokeStyle = player.vy < 0 ? "#e8edf3" : "#ffd9a8";
+        ctx.lineWidth = 2;
         ctx.beginPath();
-
-        ctx.arc(
-            22,
-            32,
-            30,
-            0,
-            Math.PI * 2
-        );
-
+        ctx.moveTo(player.x + player.width / 2, player.y + player.height + 4);
+        ctx.lineTo(player.x + player.width / 2, player.y + player.height + 14 + Math.abs(player.vy));
         ctx.stroke();
+        ctx.restore();
     }
-
-    /* -------------------------
-       SHIELD
-    ------------------------- */
-
-    if (
-        player.shield
-    ) {
-
-        ctx.strokeStyle =
-            "#7de4ff";
-
-        ctx.lineWidth = 5;
-
-        ctx.beginPath();
-
-        ctx.arc(
-            22,
-            32,
-            40,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-
-        ctx.strokeStyle =
-            "rgba(170,240,255,.35)";
-
-        ctx.lineWidth = 12;
-
-        ctx.stroke();
-    }
-
-    ctx.restore();
 }
 
-/* =========================================================
-   HERO ACCESSORIES
-========================================================= */
-
-function drawHeroAccessory(
-    hero,
-    bob
-) {
-
-    if (
-        hero.id === "milo"
-    ) {
-
-        /* Backpack */
-
-        ctx.fillStyle =
-            "#7a4d2f";
-
-        ctx.fillRect(
-            34,
-            32 + bob,
-            8,
-            14
-        );
-    }
-
-    if (
-        hero.id === "luna"
-    ) {
-
-        ctx.strokeStyle =
-            "#c7b7ff";
-
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-
-        ctx.arc(
-            32,
-            3 + bob,
-            7,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-    }
-
-    if (
-        hero.id === "rocco"
-    ) {
-
-        ctx.fillStyle =
-            "#6c4a35";
-
-        ctx.fillRect(
-            0,
-            37 + bob,
-            9,
-            13
-        );
-
-        ctx.fillRect(
-            35,
-            37 + bob,
-            9,
-            13
-        );
-    }
-
-    if (
-        hero.id === "zuki"
-    ) {
-
-        ctx.fillStyle =
-            "#5dc65e";
-
-        ctx.beginPath();
-
-        ctx.ellipse(
-            37,
-            10 + bob,
-            12,
-            5,
-            -0.6,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.fill();
-    }
-
-    if (
-        hero.id === "blaze"
-    ) {
-
-        ctx.fillStyle =
-            "#ff9c2e";
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            14,
-            0 + bob
-        );
-
-        ctx.lineTo(
-            19,
-            -13 + bob
-        );
-
-        ctx.lineTo(
-            23,
-            -2 + bob
-        );
-
-        ctx.lineTo(
-            30,
-            -12 + bob
-        );
-
-        ctx.lineTo(
-            29,
-            3 + bob
-        );
-
-        ctx.closePath();
-
-        ctx.fill();
-    }
-
-    if (
-        hero.id === "taro"
-    ) {
-
-        ctx.strokeStyle =
-            "#8cecff";
-
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-
-        ctx.arc(
-            22,
-            4 + bob,
-            18,
-            Math.PI,
-            0
-        );
-
-        ctx.stroke();
-    }
-
-    if (
-        hero.id === "koko"
-    ) {
-
-        ctx.fillStyle =
-            "#f7ca3b";
-
-        ctx.fillRect(
-            35,
-            30 + bob,
-            9,
-            9
-        );
-    }
-
-    if (
-        hero.id === "piko"
-    ) {
-
-        ctx.fillStyle =
-            "#62c8ed";
-
-        ctx.fillRect(
-            2,
-            34 + bob,
-            7,
-            15
-        );
-
-        ctx.fillRect(
-            35,
-            34 + bob,
-            7,
-            15
-        );
-    }
-
-    if (
-        hero.id === "mimi"
-    ) {
-
-        ctx.fillStyle =
-            "#ff5c91";
-
-        ctx.beginPath();
-
-        ctx.arc(
-            22,
-            39 + bob,
-            5,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.fill();
-    }
-
-    if (
-        hero.id === "bruno"
-    ) {
-
-        ctx.fillStyle =
-            "#6c452f";
-
-        ctx.fillRect(
-            0,
-            36 + bob,
-            10,
-            14
-        );
-
-        ctx.fillRect(
-            34,
-            36 + bob,
-            10,
-            14
-        );
-    }
-}
 
 /* =========================================================
    PARTICLE DRAWING
@@ -6615,6 +5928,14 @@ function updateAllHUD() {
         hudCache.healthFill = pct;
         const fill = $("health-fill");
         if (fill) fill.style.width = pct;
+    }
+
+    /* Low health gets a slow pulse *and* a hollow last pip (never colour alone). */
+    const low = health <= 1;
+    if (hudCache.healthLow !== low) {
+        hudCache.healthLow = low;
+        const pill = document.querySelector(".hud-group .hud-pill");
+        if (pill) pill.classList.toggle("hud-pip-low", low);
     }
 }
 

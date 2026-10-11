@@ -112,6 +112,48 @@ const Metro = (() => {
         a.bench(24); a.en("crawler", 12, 22); a.en("spitter", 34, 22);
     });
 
+    /* Living detail per zone theme: the same Art Kit props the Levels mode
+       uses, so stone, spores and brass read identically in both modes. */
+    const ROOM_PROPS = [
+        ["pebble", "rib", "spore"],              // 0 Hollow Gate / ash stone
+        ["spore", "mushroom", "grass"],          // 1 Fungal Warrens / Moss
+        ["pebble", "crystal"],                   // 2 Chasm / Hidden Loft
+        ["rib", "pebble"],                       // 3 The Climb (bone)
+        ["reed", "pebble", "chain"],             // 4 Bellwork Ravine (brass)
+        ["spore", "crystal", "pebble"],          // 5 The Spire (moth dust)
+        ["pebble", "crystal"]                    // 6 Warden's Hall (iron)
+    ];
+
+    /* Props are placed on real surfaces only, deterministically per room, so
+       they never move between visits - and never sit on a hazard. */
+    function buildProps(room) {
+        const kinds = ROOM_PROPS[room.theme] || ["pebble"];
+        const list = [];
+        let seed = 7919 + room.gx * 131 + room.gy * 977;
+        const r2 = n => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return (seed / 0x7fffffff) * n; };
+        /* Walk each column down to its first standable surface: props end up
+           spread across the room (floors, ledges, platforms) instead of
+           clustering in a few random spots. */
+        for (let x = 2; x < COLS - 2; x++) {
+            for (let y = 2; y < ROWS - 1; y++) {
+                if (room.g[y][x] !== ".") continue;                    // ceiling and walls
+                const below = room.g[y + 1][x];
+                if (below === "^") break;                              // never decorate spikes
+                if (!(SOLID_CH.has(below) || ONEWAY_CH.has(below))) continue;
+                if (r2(100) < 34) list.push({ kind: kinds[(r2(97) | 0) % kinds.length], x: x * TS + TS / 2 + r2(12) - 6, y: (y + 1) * TS + 2, seed: r2(10) });
+                break;
+            }
+        }
+        return list;
+    }
+    function drawProps() {
+        if (typeof Art === "undefined" || !S.props) return;
+        for (const pr of S.props) {
+            if (pr.x < cam.x - 40 || pr.x > cam.x + vw + 40) continue;      // cheap cull
+            Art.prop(ctx, pr.kind, pr.x, pr.y, pr.seed, Art.FX.t, R.theme);
+        }
+    }
+
     /* ===================================================  STATE  ====== */
     let m = null;                       // = save.metro (persistent)
     let R = null, P = null, S = null;   // room, player, runtime state
@@ -419,12 +461,19 @@ const Metro = (() => {
 
     function damageEnemy(e, dmg, dirFace) {
         e.hp -= dmg; e.flash = 6; burst(e.x + e.w / 2, e.y + e.h / 2, "#e8edf3", 6);
+        if (typeof Art !== "undefined") Art.FX.number(e.x + e.w / 2, e.y - 4, "-" + dmg, e.t === "warden" ? "#ff8a8a" : "#ffd9a8");
         if (e.t !== "warden") { e.vx = dirFace * 4; e.vy = -3; if (e.t === "flyer") e.st = "recover", e.tm = 40; }
         else if (e.phase === 1 && e.hp <= 22) { e.phase = 2; S.shake = 14; S.phaseFlash = 40; MetroFx.play("phase"); toast("The Warden's hollow shell cracks…"); }
         if (e.hp <= 0) killEnemy(e);
     }
     function killEnemy(e) {
-        e.dead = true; burst(e.x + e.w / 2, e.y + e.h / 2, "#cfe9ff", e.t === "warden" ? 60 : 14); S.shake = e.t === "warden" ? 20 : 4; MetroFx.play(e.t === "warden" ? "bigdeath" : "kill");
+        e.dead = true; e.deadT = e.t === "warden" ? 110 : 26;                   // death animation, then gone
+        burst(e.x + e.w / 2, e.y + e.h / 2, "#cfe9ff", e.t === "warden" ? 60 : 14);
+        if (typeof Art !== "undefined") {
+            Art.FX.ring(e.x + e.w / 2, e.y + e.h / 2, 8, "#f6e7ae");
+            Art.FX.addShake(e.t === "warden" ? 6 : 2);
+        }
+        S.shake = e.t === "warden" ? 20 : 4; MetroFx.play(e.t === "warden" ? "bigdeath" : "kill");
         const geo = e.t === "warden" ? 150 : E_DEF[e.t].geo, n = e.t === "warden" ? 15 : geo, v = geo / n;
         for (let i = 0; i < n; i++) S.coins.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, vx: rnd(-3, 3), vy: rnd(-7, -2), v, w: 8, h: 8 });
         if (e.t === "warden") {
@@ -438,11 +487,20 @@ const Metro = (() => {
 
     function shootAt(e, vx, vy, g, r) { S.eshots.push({ x: e.x + e.w / 2 - r, y: e.y + e.h / 2 - r, vx, vy, g, w: r * 2, h: r * 2, life: 160 }); }
 
+    const NOTICE_FRAMES = 26;             // how long the "noticed you" pop stays visible
+
     function stepEnemy(e) {
         if (e.dead) return;
         if (e.stun > 0) { e.stun--; return; }                              // Lantern Sight / Bell Hook stun: no AI, no contact damage
         const p = P, dx = (p.x + p.w / 2) - (e.x + e.w / 2), dy = (p.y + p.h / 2) - (e.y + e.h / 2), dist = Math.hypot(dx, dy);
         e.flash--; e.tm--;
+        /* Awareness is a tell: each mob type wakes at its own distance and
+           pops the "!" cue once, instead of only changing eye colour. */
+        const noticeD = e.t === "spitter" ? 440 : e.t === "warden" ? 480 : e.t === "crawler" ? 210 : 300;
+        const near = dist < noticeD;
+        if (near && !e.alert) e.noticeT = NOTICE_FRAMES;
+        e.alert = near;
+        if (e.noticeT > 0) e.noticeT--;
         if (e.t === "crawler") {
             if (Math.abs(e.vx) > 1.1) e.vx *= .85; else e.vx = Math.sign(e.vx || -1) * 1;
             const r = move(e, e.vx, 0);
@@ -525,7 +583,7 @@ const Metro = (() => {
             if (ab && m.abilities[ab]) R.g[y][x] = ".";
         }
         if (P) { P.hook = null; P.sinking = false; }
-        S = Object.assign(S || {}, { enemies: [], items: [], coins: [], shots: [], eshots: [], parts: S && S.parts || [], lock: false, banner: 150, t: 0, bossRoom: false, boss: null, dialog: null, lumen: [], hookLine: null, ring: null });
+        S = Object.assign(S || {}, { enemies: [], items: [], coins: [], shots: [], eshots: [], parts: S && S.parts || [], lock: false, banner: 150, t: 0, bossRoom: false, boss: null, dialog: null, lumen: [], hookLine: null, ring: null, props: buildProps(R) });
         R.enemies.forEach(en => spawnEnemy(en.t, en.x, en.y));
         R.items.forEach(it => { if (!m.collected.includes(it.id)) S.items.push({ ...it, bob: Math.random() * 6 }); });
         if (R.boss) {
@@ -599,6 +657,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         if (S.dialog) { if (K.atkP || K.jumpP || K.upP) { S.dialog.i++; if (S.dialog.i >= S.dialog.lines.length) S.dialog = null; } K.atkP = K.jumpP = K.upP = false; return; }
         if (S.hitstop > 0) { S.hitstop--; return; }
         S.t++;
+        if (typeof Art !== "undefined") Art.FX.step();          // damage numbers / rings clock
         if (S.dead) {
             S.deadT++;
             if (S.deadT > MetroFx.deadFrames()) { const b = m.bench; P.hp = m.hpMax; P.soul = 0; P.invuln = 60; P.vx = P.vy = 0; S.dead = 0; loadRoom(b.room, { x: b.x - P.w / 2, y: 22 * TS - P.h - 1 }); }
@@ -623,7 +682,8 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         if (S.phaseFlash > 0) S.phaseFlash--; if (S.hudPulse > 0) S.hudPulse--; if (S.ring && ++S.ring.t > S.ring.max) S.ring = null;
         lumenTick(); if (S.hookLine && --S.hookLine.t <= 0) S.hookLine = null;
         if (S.popup && --S.popup.t <= 0) S.popup = null; if (S.toast && --S.toast.t <= 0) S.toast = null;
-        S.enemies = S.enemies.filter(e => !e.dead || e.t === "warden");
+        S.enemies.forEach(e => { if (e.dead && e.deadT > 0) e.deadT--; });
+        S.enemies = S.enemies.filter(e => !e.dead || e.deadT > 0);
         updateCam();
     }
     function burst(x, y, col, n) { if (!S) return; for (let i = 0; i < n; i++) S.parts.push({ x, y, vx: rnd(-3, 3), vy: rnd(-4, 1), life: rnd(14, 30), col, s: rnd(1.5, 3.5) }); }
@@ -642,7 +702,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
     }
 
     /* ================================================  RENDER  ======== */
-    let roomCache = null, bgCache = null;
+    let roomCache = null, bgCache = null, cacheOK = false;      // cacheOK: the art tests build one real frame headlessly
     const pal = () => (typeof worlds !== "undefined" && worlds[R.theme]) || { sky1: "#0f1420", sky2: "#26324a", ground: "#3a4650", dirt: "#1d232b" };
     const hash = (x, y) => { let h = x * 374761393 + y * 668265263; h = (h ^ (h >> 13)) * 1274126177; return ((h ^ (h >> 16)) >>> 0) / 4294967295; };
 
@@ -661,7 +721,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         else if (ab === "hook") { c.arc(cx, cy, 7, 0, 7); c.stroke(); c.beginPath(); c.arc(cx, cy, 2.5, 0, 7); c.fill(); }
     }
     function renderRoomCache() {
-        if (TEST) return;
+        if (TEST && !cacheOK) return;
         roomCache = roomCache || document.createElement("canvas"); roomCache.width = RW; roomCache.height = RH;
         const c = roomCache.getContext("2d"), P2 = pal(); c.clearRect(0, 0, RW, RH);
         for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
@@ -705,7 +765,7 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         const shk = S.shake * MetroFx.shakeScale(); const sh = shk > .5 ? [rnd(-shk, shk), rnd(-shk, shk)] : [0, 0];
         ctx.save(); ctx.scale(scale, scale); ctx.translate(-Math.round(cam.x) + sh[0], -Math.round(cam.y) + sh[1]);
         ctx.drawImage(bgCache[0], cam.x * .6, cam.y * .6); ctx.drawImage(bgCache[1], cam.x * .3, cam.y * .3);
-        ctx.drawImage(roomCache, 0, 0); drawLumen();
+        ctx.drawImage(roomCache, 0, 0); drawProps(); drawLumen();
         if (R.bench) drawBench(R.bench.x);
         if (R.npc) drawNpc(R.npc.x);
         S.items.forEach(drawItem); S.coins.forEach(c => { ctx.fillStyle = "#cfe3f0"; ctx.beginPath(); ctx.arc(c.x + 4, c.y + 4, 4, 0, 7); ctx.fill(); });
@@ -714,43 +774,113 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         S.shots.forEach(s => { ctx.fillStyle = "#cfe9ff"; ctx.shadowColor = "#9fd0ff"; ctx.shadowBlur = 10; ctx.fillRect(s.x, s.y, s.w, s.h); ctx.shadowBlur = 0; });
         drawPlayer(); drawHookLine(); drawRing();
         S.parts.forEach(q => { ctx.globalAlpha = Math.min(1, q.life / 12); ctx.fillStyle = q.col; ctx.fillRect(q.x, q.y, q.s, q.s); }); ctx.globalAlpha = 1;
+        if (typeof Art !== "undefined") Art.FX.drawWorld(ctx);   // damage numbers + impact rings
         ctx.restore();
         if (window.Scenery) Scenery.draw(ctx, { cameraX: cam.x * scale, world: R.theme, player: { x: (P.x - cam.x) * scale + cam.x * scale, y: (P.y - cam.y) * scale, width: P.w * scale, height: P.h * scale } });
         drawHUD();
     }
 
+    /* The Vessel: the same renderer as the Levels mode (js/art.js drawVessel).
+       The hitbox stays exactly 20x30; the art is 30x40 so the moth cap and
+       the lantern read at Descent scale, and the feet sit on the hitbox
+       bottom so contact damage always looks fair. */
+    const VW = 30, VH = 40;
+
+    let lastGroundY = 0;                      // where the contact shadow stays while airborne
+
+    function vesselState(hero, over) {
+        const p = P;
+        if (p.onGround) lastGroundY = p.y + p.h;
+        else if (!lastGroundY) lastGroundY = p.y + p.h;
+        const base = {
+            hero: hero,
+            x: p.x + p.w / 2 - VW / 2,
+            y: p.y + p.h - VH,
+            w: VW, h: VH,
+            face: p.face,
+            t: (typeof Art !== "undefined") ? Art.FX.t : S.t,
+            walk: (p.onGround && Math.abs(p.vx) > .4) ? S.t * .22 : 0,
+            vx: p.vx, vy: p.vy,
+            air: !p.onGround,
+            dash: p.dashT > 0 ? 1 : 0,
+            attack: p.attackT > 0 ? Math.min(1, p.attackT / 10) : 0,
+            hurt: p.invuln > 58 ? Math.min(1, (p.invuln - 58) / 12) : 0,
+            heal: p.healT > 0 ? Math.min(1, p.healT / 60) : 0,
+            blink: (typeof Art !== "undefined") ? ((Art.FX.t + 17) % 235) < 5 : false,
+            dead: S.dead ? 1 : 0,
+            squash: p.sinking ? .18 : 0,
+            groundY: p.onGround ? p.y + p.h : Math.max(p.y + p.h, lastGroundY)
+        };
+        return Object.assign(base, over || {});
+    }
+
     function drawPlayer() {
+        if (typeof Art === "undefined" || !Art.drawVessel) return;
         const p = P, hero = (typeof heroes !== "undefined" && heroes.find(h => h.id === save.selectedHero)) || { color: "#d94f65", secondary: "#8f2940" };
         if (p.invuln > 0 && Math.floor(p.invuln / 4) % 2 && !S.dead) return;
-        const cx = p.x + p.w / 2, y = p.y, f = p.face, sq = p.dashT > 0 ? 1.2 : 1;
-        ctx.save(); ctx.translate(cx, y + p.h); ctx.scale(f * sq, 1 / sq);
-        if (p.dashT > 0) { ctx.globalAlpha = .35; ctx.fillStyle = hero.color; ctx.fillRect(-34, -26, 30, 20); ctx.globalAlpha = 1; }
-        ctx.fillStyle = hero.secondary || hero.color; ctx.fillRect(-8, -12, 16, 12);                 // body
-        ctx.fillStyle = "#f3d1aa"; ctx.fillRect(-8, -22, 16, 11);                                     // face
-        ctx.fillStyle = "#25263a"; ctx.fillRect(1, -19, 3, 5); ctx.fillRect(-5, -19, 3, 5);           // eyes
-        ctx.fillStyle = hero.color; ctx.beginPath(); ctx.ellipse(0, -23, 15, 11, 0, Math.PI, 0); ctx.lineTo(15, -22); ctx.lineTo(-15, -22); ctx.fill();   // cap
-        if (p.healT > 0) { ctx.strokeStyle = "#cfe9ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, -15, 12 + p.healT / 4, 0, 7); ctx.stroke(); }
-        ctx.restore();
-        if (p.attackT > 0 && p.rect) { ctx.save(); ctx.globalAlpha = .55 * (p.attackT / 8); ctx.fillStyle = "#e8edf3"; ctx.beginPath(); ctx.ellipse(p.rect.x + p.rect.w / 2, p.rect.y + p.rect.h / 2, p.rect.w / 2, p.rect.h / 2, 0, 0, 7); ctx.fill(); ctx.restore(); }
-    }
-    function drawEnemy(e) {
-        if (e.dead) return;
-        ctx.save(); ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
-        const fl = e.flash > 0, tele = e.st === "wind", col = fl ? "#fff" : null;
-        if (e.t === "crawler") { ctx.scale(e.vx > 0 ? -1 : 1, 1); ctx.fillStyle = col || "#2a2f3d"; ctx.beginPath(); ctx.ellipse(0, 2, 14, 10, 0, 0, 7); ctx.fill(); ctx.fillStyle = "#cfe3f0"; ctx.fillRect(-9, -3, 3, 4); ctx.fillRect(-3, -3, 3, 4); }
-        else if (e.t === "flyer") { const w = Math.sin(S.t / 3 + e.home.x) * 8; ctx.fillStyle = col || (tele ? "#ffd0d0" : "#3a3550"); ctx.beginPath(); ctx.ellipse(0, 0, 9, 8, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-18, -10 + w); ctx.lineTo(-8, 4); ctx.moveTo(0, -2); ctx.lineTo(18, -10 + w); ctx.lineTo(8, 4); ctx.fill(); ctx.fillStyle = "#cfe3f0"; ctx.fillRect(-4, -2, 3, 3); ctx.fillRect(2, -2, 3, 3); }
-        else if (e.t === "spitter") { ctx.scale(e.face, 1); ctx.fillStyle = col || (tele ? "#e9ffd0" : "#2b4a3a"); ctx.beginPath(); ctx.ellipse(0, 4, 13, 11 + (tele ? 3 : 0), 0, 0, 7); ctx.fill(); ctx.fillStyle = "#b8ff9a"; ctx.beginPath(); ctx.arc(8, -2, tele ? 6 : 4, 0, 7); ctx.fill(); }
-        else if (e.t === "warden") {
-            ctx.scale(e.face, 1); const crouch = tele ? 8 : 0;
-            ctx.fillStyle = col || (tele ? "#f2d6d6" : "#1d1a2b"); ctx.fillRect(-20, -26 + crouch, 40, 58 - crouch);            // armor
-            ctx.fillStyle = col || "#2e2a45"; ctx.fillRect(-16, -32 + crouch, 32, 14);                                               // head
-            ctx.fillStyle = "#e8edf3"; ctx.beginPath(); ctx.moveTo(-14, -30 + crouch); ctx.lineTo(-22, -46 + crouch); ctx.lineTo(-6, -32 + crouch); ctx.moveTo(14, -30 + crouch); ctx.lineTo(22, -46 + crouch); ctx.lineTo(6, -32 + crouch); ctx.fill();
-            ctx.fillStyle = e.phase === 2 ? "#ff8a8a" : "#cfe9ff"; ctx.fillRect(2, -26 + crouch, 8, 4);                               // eye
-            if (e.phase === 2) { ctx.strokeStyle = "#cfe9ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-10, -10); ctx.lineTo(0, 4); ctx.lineTo(-6, 18); ctx.stroke(); }
+
+        /* Shade Cloak leaves two after-images behind. */
+        if (p.dashT > 0) {
+            for (let i = 1; i <= 2; i++) {
+                ctx.save(); ctx.globalAlpha = .24 * (1 - i / 3);
+                Art.drawVessel(ctx, vesselState(hero, { x: p.x + p.w / 2 - VW / 2 - p.dashDir * i * 9, dash: 0, simple: true }));
+                ctx.restore();
+            }
         }
-        if (e.stun > 0) { ctx.fillStyle = "#f6e7ae"; for (let i = 0; i < 3; i++) { const a = S.t / 10 + i * 2.1; ctx.beginPath(); ctx.arc(Math.cos(a) * 12, -e.h / 2 - 10 + Math.sin(a) * 3, 2.2, 0, 7); ctx.fill(); } }
-        ctx.restore();
+
+        Art.drawVessel(ctx, vesselState(hero, {
+            attack: p.attackT > 0 ? Math.min(1, p.attackT / 10) : 0,
+            heal: p.healT > 0 ? Math.min(1, p.healT / 60) : 0
+        }));
+
+        /* the blade arc is drawn by the renderer; the wall-slide puff is here */
+        if (p.wallLock > 0 && !p.onGround) {
+            ctx.save(); ctx.globalAlpha = .35; ctx.fillStyle = "#cfe3f0";
+            ctx.fillRect(p.x + (p.wallDir > 0 ? -4 : p.w), p.y + 4, 2, 10);
+            ctx.restore();
+        }
     }
+
+
+    /* One call into the Art Kit: role silhouette, walk cycle, attack wind-up,
+       hit flash and death all come from the shared table, so the Descent's
+       crawler/flyer/spitter read exactly like the Levels mobs. */
+    function drawEnemy(e) {
+        if (typeof Art === "undefined" || !Art.drawMob) return;
+        if (e.dead && !(e.deadT > 0)) return;
+
+        const dying = !!e.dead;
+        const fade = dying ? Math.max(0, e.deadT / (e.t === "warden" ? 110 : 26)) : 1;
+
+        /* Wind-up = the shape-coded attack tell, fed by the AI's own timers. */
+        let windup = 0;
+        if (e.st === "wind") windup = e.t === "flyer" ? 1 - e.tm / 32 : (e.t === "spitter" ? 1 - e.tm / 24 : .6);
+        if (e.t === "warden" && e.st === "wind") windup = Math.max(0, 1 - e.tm / 30);
+
+        const walk = e.t === "crawler" ? S.t * .18 : S.t * .16;
+
+        Art.drawMob(ctx, e.t, {
+            x: e.x,
+            feet: e.y + e.h,
+            w: e.w,
+            h: e.h,
+            face: e.face === -1 ? -1 : 1,
+            t: S.t + (e.home ? e.home.x * .01 : 0),
+            walk: walk,
+            seed: e.home ? e.home.x * .017 : 0,
+            ground: e.t !== "flyer",
+            alert: !dying && !!e.alert,
+            notice: !dying ? (e.noticeT || 0) / NOTICE_FRAMES : 0,
+            windup: dying ? 0 : Math.max(windup, 0),
+            flash: e.flash > 0 ? Math.min(.85, e.flash / 6) : 0,
+            stun: e.stun > 0 ? 1 : 0,
+            phase2: e.phase === 2 ? 1 : 0,
+            alpha: fade,
+            squash: dying ? (1 - fade) * .35 : 0
+        });
+    }
+
+
     /* Telegraph assist: shape cues that never depend on colour. A "!" marker
        above any enemy that is winding up; the Warden also shows a dashed line
        (charge) or ring (slam) where its attack will land. */
@@ -802,8 +932,63 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         const col = it.t.startsWith("ability") ? "#f6e7ae" : it.t.startsWith("charm") ? "#a98be0" : it.t === "heart" ? "#ff9aa8" : "#8fc1e3";
         ctx.shadowColor = col; ctx.shadowBlur = 16; ctx.fillStyle = col; ctx.rotate(Math.PI / 4); ctx.fillRect(-7, -7, 14, 14); ctx.restore();
     }
-    function drawBench(x) { ctx.fillStyle = "#2a3140"; ctx.fillRect(x - 22, 22 * TS - 14, 44, 6); ctx.fillRect(x - 18, 22 * TS - 8, 6, 8); ctx.fillRect(x + 12, 22 * TS - 8, 6, 8); ctx.fillStyle = "#cfe9ff"; ctx.globalAlpha = .6 + Math.sin(S.t / 20) * .2; ctx.beginPath(); ctx.arc(x, 22 * TS - 24, 5, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
-    function drawNpc(x) { ctx.fillStyle = "#3a3550"; ctx.fillRect(x - 11, 22 * TS - 34, 22, 34); ctx.fillStyle = "#e8edf3"; ctx.fillRect(x - 9, 22 * TS - 44, 18, 12); ctx.fillStyle = "#25263a"; ctx.fillRect(x - 4, 22 * TS - 40, 3, 4); ctx.fillRect(x + 2, 22 * TS - 40, 3, 4); }
+    /* Bench: brass rail, stitched leather pad and a lamp that breathes.
+       Warm, rounded, always carrying light - the friendly-object language. */
+    function drawBench(x) {
+        const y = 22 * TS, t = S.t, flick = 1 + Math.sin(t / 9) * .05 + Math.sin(t / 4.1) * .03;
+        ctx.save();
+        ctx.fillStyle = "rgba(0,0,0,.28)";
+        ctx.beginPath(); ctx.ellipse(x, y - 1, 26, 4, 0, 0, 7); ctx.fill();
+        /* legs + rail */
+        ctx.fillStyle = "#2a3140";
+        ctx.fillRect(x - 20, y - 12, 5, 12); ctx.fillRect(x + 15, y - 12, 5, 12);
+        ctx.fillRect(x - 24, y - 16, 48, 6);
+        /* pad */
+        ctx.fillStyle = "#4a3a30"; ctx.fillRect(x - 22, y - 21, 44, 6);
+        ctx.strokeStyle = "#c9a35a"; ctx.lineWidth = 1.5; ctx.strokeRect(x - 22.5, y - 21.5, 45, 7);
+        /* lamp on a post */
+        ctx.fillStyle = "#2a3140"; ctx.fillRect(x + 24, y - 52, 4, 52);
+        Art.glow(ctx, x + 26, y - 56, 74 * flick, .75);
+        ctx.fillStyle = "#c9a35a"; ctx.beginPath(); ctx.arc(x + 26, y - 56, 5.5, 0, 7); ctx.fill();
+        ctx.fillStyle = "#f2b84b"; ctx.beginPath(); ctx.arc(x + 26, y - 56, 3 * flick, 0, 7); ctx.fill();
+        /* small gear hooks under the rail (stitched, not ruined) */
+        ctx.strokeStyle = "#8d9bb0"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x - 14, y - 10); ctx.lineTo(x - 14, y - 6); ctx.moveTo(x + 8, y - 10); ctx.lineTo(x + 8, y - 6); ctx.stroke();
+        ctx.restore();
+    }
+
+    /* Old Wick: a hooded keeper, lantern in hand, hood breathing slowly.
+       Reads as friendly by shape (soft dome hood) and by warm light. */
+    function drawNpc(x) {
+        const y = 22 * TS, t = S.t;
+        const breath = Math.sin(t / 44) * 1.2, sway = Math.sin(t / 62) * 1.4;
+        ctx.save();
+        ctx.translate(x + sway * .4, y);
+        ctx.fillStyle = "rgba(0,0,0,.28)";
+        ctx.beginPath(); ctx.ellipse(0, -1, 15, 3.5, 0, 0, 7); ctx.fill();
+        /* robe */
+        ctx.fillStyle = "#332f47";
+        ctx.beginPath();
+        ctx.moveTo(-12, 0); ctx.lineTo(-10, -30 + breath); ctx.lineTo(-6, -38 + breath);
+        ctx.lineTo(6, -38 + breath); ctx.lineTo(10, -30 + breath); ctx.lineTo(12, 0);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "#0b0e16"; ctx.lineWidth = 1.6; ctx.stroke();
+        /* hood (soft dome, no hard corners) */
+        ctx.fillStyle = "#3f3a58";
+        ctx.beginPath(); ctx.ellipse(0, -42 + breath, 11, 9, 0, Math.PI, 0); ctx.fill();
+        ctx.strokeStyle = "#0b0e16"; ctx.stroke();
+        /* face shadow + eyes */
+        ctx.fillStyle = "#141122"; ctx.beginPath(); ctx.ellipse(0, -38 + breath, 7.5, 4.5, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "#cfe9ff"; ctx.fillRect(-4.5, -39 + breath, 2.4, 2.4); ctx.fillRect(2, -39 + breath, 2.4, 2.4);
+        /* lantern, held to one side */
+        ctx.fillStyle = "#c9a35a"; ctx.fillRect(12, -26 + breath, 2, 8);
+        Art.glow(ctx, 13, -14 + breath, 58 * (1 + Math.sin(t / 11) * .05), .8);
+        ctx.fillStyle = "#c9a35a";
+        ctx.fillRect(9, -10 + breath, 9, 11);
+        ctx.fillStyle = "#2b2016"; ctx.fillRect(11, -8 + breath, 5, 7);
+        ctx.fillStyle = "#f2b84b"; ctx.beginPath(); ctx.arc(13.5, -4 + breath, 2.2, 0, 7); ctx.fill();
+        ctx.restore();
+    }
 
     function drawHUD() {
         const W = innerWidth, H = innerHeight; ctx.save();
@@ -950,8 +1135,9 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
 
     /* ==================================================  LOOP  ======== */
     function resize() {
-        dpr = Math.min(devicePixelRatio || 1, DPR_CAP);
-        cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; scale = Math.max(.7, Math.min(1.6, innerHeight / VIEW_H));
+        dpr = Math.min(globalThis.devicePixelRatio || 1, DPR_CAP);
+        if (cv) { cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; }   // headless: no canvas yet
+        scale = Math.max(.7, Math.min(1.6, innerHeight / VIEW_H));
         vw = innerWidth / scale; vh = innerHeight / scale;
     }
     function start() {
@@ -1005,7 +1191,26 @@ const clampY = y => Math.max(17 * TS, Math.min(22 * TS - p.h - 1, y));
         load(id, x, y) { loadRoom(id, { x, y }); P.hp = m.hpMax; return P; },
         SEAL_AB, SOLID_CH, ONEWAY_CH, ABIL_KEYS, HOOK_RANGE,
         step(keys) { Object.assign(K, { left: 0, right: 0, up: 0, down: 0, jump: 0, heal: 0, jumpP: 0, atkP: 0, dashP: 0, spP: 0, upP: 0, lampP: 0, hookP: 0 }, keys || {}); step(); return P; },
-        get P() { return P; }, get S() { return S; }, get R() { return R; }, grounded: () => grounded(P)
+        get P() { return P; }, get S() { return S; }, get R() { return R; }, grounded: () => grounded(P),
+        /* Draw one real frame into a supplied context (used by the art tests:
+           headless there is no canvas, so the test passes a recording stub). */
+        render(c, w, h) {
+            if (c && c.canvas) cv = c.canvas;                 // the harness passes its own canvas
+            if (w) { globalThis.innerWidth = w; globalThis.innerHeight = h; resize(); }
+            ctx = c; draw(); return true;
+        },
+        /* The full enemy draw path for one arbitrary mob. */
+        drawMobOf(type) {
+            const e = S.enemies.find(x => x.t === type);
+            if (e) { drawEnemy(e); return true; }
+            return false;
+        },
+        spawn(type, x, feetY) { return spawnEnemy(type, x, feetY); },
+        buildCaches() { cacheOK = true; renderRoomCache(); return !!roomCache; },
+        get roomCanvas() { return roomCache; },
+        resize() { resize(); return { scale, vw, vh }; },
+        get cam() { return cam; },
+        get scale() { return scale; }
     };
     return { start, stop, _test };
 })();

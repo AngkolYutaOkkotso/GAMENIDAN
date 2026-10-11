@@ -3,8 +3,23 @@
 const fs = require("fs"), vm = require("vm"), path = require("path");
 global.window = global; global.save = { coins: 0, selectedHero: "milo" }; global.saveGame = () => {};
 global.stopGame = () => {}; global.hideScreens = () => {};
+global.innerWidth = 1280; global.innerHeight = 720; global.devicePixelRatio = 1;
+/* A document stub good enough for the Art Kit's sprite cache and the room
+   canvas, so one real frame can be rendered headlessly. */
+global.document = {
+  getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+  addEventListener() { }, removeEventListener() { }, createTextNode: t => ({ textContent: t }),
+  createElement: () => {
+    const cv = { width: 10, height: 10 };
+    cv.getContext = () => makeFakeCtxBeforeLoad();
+    return cv;
+  }
+};
+function makeFakeCtxBeforeLoad() { return require("../tools/fakectx.js").makeFakeCtx(); }
+vm.runInThisContext(fs.readFileSync(path.join(__dirname, "../js/art.js"), "utf8"));
 vm.runInThisContext(fs.readFileSync(path.join(__dirname, "../js/metroFx.js"), "utf8"));
 vm.runInThisContext(fs.readFileSync(path.join(__dirname, "../js/metroid.js"), "utf8"));
+const { makeFakeCtx } = require("../tools/fakectx.js");
 const T = Metro._test, TS = T.TS;
 let pass = 0, fail = 0;
 const ok = (c, name) => { c ? pass++ : fail++; console.log((c ? "PASS " : "FAIL ") + name); };
@@ -296,6 +311,55 @@ ok(shaft(false) === false, "r4: without wall jump the shaft is unreachable");
     if (bad) break;
   }
   ok(!bad, "fuzz: every room x 4000 random frames with all abilities, no exceptions / NaN " + (bad || ""));
+}
+
+/* ---- 12. Descent art pass: the shared renderer, its states and its budget ---- */
+{
+  const types = ["crawler", "flyer", "spitter", "warden"];
+  const bad = [];
+  ok(T.buildCaches(), "art: the room canvas builds (one real frame can be rendered headlessly)");
+  for (const t of types) {
+    global.save = { coins: 0, selectedHero: "milo" };
+    T.init({ dash: 1, wall: 1, dbl: 1, lantern: 1, sink: 1, hook: 1 });
+    T.load("r0", 100, 22 * TS - 31);
+    T.S.enemies.length = 0;
+    T.spawn(t, 300, 22 * TS);
+    const e = T.S.enemies[0];
+    const c = makeFakeCtx();
+    try {
+      for (const st of ["idle", "wind", "lunge", "recover", "chase"]) {
+        e.st = st; e.tm = 12; e.flash = 4; e.stun = 0;
+        T.render(c, 1280, 720);
+      }
+      e.stun = 30; e.flash = 0; T.render(c, 1280, 720);
+      e.stun = 0; e.phase = 2; T.render(c, 1280, 720);
+      e.dead = true; e.deadT = 12; T.render(c, 1280, 720);       // the death animation frame
+    } catch (ex) { bad.push(t + ":" + ex.message); }
+    if (c.calls.nan.length) bad.push(t + ":NaN(" + [...new Set(c.calls.nan)].join(",") + ")");
+  }
+  ok(bad.length === 0, "art: every Descent mob renders, including death and phase 2 " + bad.join(" | "));
+
+  /* Milo uses the shared Vessel renderer, so the Descent and the Levels mode
+     can never drift apart. */
+  const src = fs.readFileSync(path.join(__dirname, "../js/metroid.js"), "utf8");
+  ok(/Art\.drawVessel/.test(src) && /Art\.drawMob/.test(src) && /Art\.prop/.test(src),
+    "art: the Descent draws the shared Vessel, mob families and props");
+
+  /* A room's props only ever stand on a real surface. */
+  fresh({});
+  T.load("r9", 100, 22 * TS - 31);
+  const props = T.S.props || [];
+  const solidOrOneWay = (x, y) => {
+    const g = T.R.g, col = Math.floor(x / TS), row = Math.floor(y / TS);
+    return row >= 0 && row < T.ROWS && col >= 0 && col < T.COLS && (T.SOLID_CH.has(g[row][col]) || T.ONEWAY_CH.has(g[row][col]));
+  };
+  ok(props.length > 0 && props.every(pr => solidOrOneWay(pr.x, pr.y + 2)), "art: every room prop stands on solid or one-way ground (" + props.length + " in Anchor Hall)");
+
+  /* Draw-call budget per frame with the room fully populated. */
+  const c2 = makeFakeCtx();
+  T.S.enemies.length = 0; T.spawn("crawler", 200, 22 * TS); T.spawn("flyer", 300, 12 * TS); T.spawn("spitter", 400, 22 * TS);
+  T.render(c2, 1280, 720);
+  ok(c2.calls.n < 6000, "art: a full Descent frame stays inside the draw budget (" + c2.calls.n + " calls)");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

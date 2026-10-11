@@ -21,6 +21,16 @@ docs/DESIGN.md    full design doc. Tags show what is built: [BUILT], [STAGE n] (
 tests/metro.test.js  automated simulation tests for the Descent (node tests/metro.test.js)
 js/scenery.js     particles, fog, lighting, procedural ambient audio
 js/threshold.js   loading + login screen atmosphere (soul motes, moths, parallax, lore lines)
+js/art.js         the Art Kit: palette, role-based mob silhouettes, the shared Vessel renderer,
+                  living ground props and the feedback bus (shake / hit-stop / flash / numbers)
+docs/ART_DIRECTION.md  character, mob, animation, VFX and UI art direction + the audit
+preview/art.html  gallery for every silhouette, palette and prop (open it in a browser)
+tests/levels.test.js  headless smoke test for the Levels mode + the Art Kit
+tools/fakectx.js  recording canvas stub used by the headless art tests
+tools/raster.js   tiny software Canvas2D + PNG writer (no dependencies)
+tools/sheet.js    renders preview/sheet-*.png with it, so art can be reviewed offline
+tools/frame.js    renders real game frames into preview/frame-*.png (see DIFF= for layer checks)
+tests/art.test.js pixel-level art tests (silhouettes, contrast, tells, sprite cache)
 supabase/schema.sql   database table + security policies
 ```
 
@@ -88,6 +98,62 @@ When you press Wish, the result is rolled, Geo is deducted, the save is written 
 ## What changed in game.js
 Search for `SaveSystem`, `Scenery`, `applySave`, `normalizeSave` and `"gacha-screen"` – about 50 added lines; gameplay is untouched.
 
+## Presentation overhaul (characters, mobs, animation, feel)
+
+Design and staging live in `docs/ART_DIRECTION.md`; the rules are implemented in `js/art.js`.
+Nothing about the story, the levels, the physics, the controls, the Geo economy or the save
+format changed - the levels' mob hitboxes moved onto the ground line so the art and the
+collision agree, and everything else is presentation.
+
+**What changed**
+
+- **Milo, the Lantern Vessel.** One renderer for both modes (`Art.drawVessel`): wide moth cap
+  with antennae, teardrop cloak with a split hem, and a lantern held *forward*. The lantern,
+  the cap overhang and the lagging cloak keep the facing readable at dash speed, and a 2 px
+  warm rim light plus the lantern glow keep the silhouette readable in the darkest zone.
+  Idle breathing, blinking, walk cycle, jump stretch, landing squash, attack anticipation
+  and follow-through, hurt flash and a dash after-image trail are all procedural (no asset
+  files). The ten Vessels keep their existing colours (cap = hero colour, cloak = secondary).
+- **Mobs read by shape.** Every enemy now draws from one of nine silhouette families
+  (`dome, shell, beast, brute, wing, eye, turret, sentry, warden`) chosen by role - rounded for
+  weak/passive, angular for fast/dangerous, bulky for tanks - with its own palette, height to
+  width ratio and idle/walk/attack/hurt/death motion. Slimes are domes, wolves are long
+  quadrupeds, bats and birds are winged, golems are hunched brutes, knights are upright
+  sentries, casters are hooded turrets with orbiting runes. Ranged mobs and pouncers now show
+  a **wind-up tell** before they attack, and a hit makes them flash and get knocked back.
+- **The world breathes.** Deterministic ground detail per zone (grass, spores, ash reeds,
+  ice spikes, crystal shards, mushrooms, chains, bone shards) sways gently and is never
+  taller than a tile, never on a hazard, never over a platform or attack.
+- **Feedback in both modes.** Hit-stop, small camera shake, impact rings, floating damage
+  numbers, damage vignette, landing dust, footsteps, coin and checkpoint bursts, and
+  procedural sounds (`jump land dash swing hit kill hurt heal pickup unlock rest tell phase
+  death bigdeath`) - all of them gated by the existing accessibility rows, so the Levels mode
+  now honours Screen shake / Flashing effects / Hit-stop too, and turning them all off is a
+  complete "reduced motion" mode.
+- **HUD.** Damage shakes the HUD and pulses the health pill, coins flash the coin pill, and
+  one mask left pulses the pip (shape + motion, never colour alone). `prefers-reduced-motion`
+  disables every HUD animation.
+
+**See it / test it**
+
+```bash
+npx http-server -p 8080          # then open http://localhost:8080
+open preview/art.html            # art gallery: silhouettes, palettes, props, black-fill test
+node tests/levels.test.js        # Levels + Art Kit smoke test (26 checks)
+node tests/metro.test.js         # Descent physics + art (61 checks)
+node tests/art.test.js           # pixel tests: silhouettes, contrast, tells (18 checks)
+node tools/sheet.js              # re-render preview/sheet-*.png after an art change
+node tools/frame.js              # render real frames: preview/frame-levels-*.png
+```
+
+`preview/sheet-vessel.png`, `sheet-mobs.png`, `sheet-silhouette.png` and `sheet-props.png`
+show every character, mob, prop and palette at gameplay scale (the silhouette sheet is the
+black-fill test); `preview/frame-*.png` are whole frames rendered by the game itself.
+
+`preview/art.html` has a **black silhouette test** toggle: fill every creature with one flat
+colour and check that role, threat and facing are still readable. That is the acceptance test
+for the whole art pass.
+
 ## Deploy on Vercel
 Push the folder to GitHub → import in Vercel → Framework preset **Other**, no build command → Deploy. Then add your Vercel URL to Supabase *Site URL / Redirect URLs*.
 
@@ -142,7 +208,9 @@ Enemy and boss danger is shown by shape as well as colour, and the Sound toggle 
 
 ### Testing
 ```bash
-node tests/metro.test.js
+node tests/metro.test.js      # 61 checks: rooms, gates, combat, boss, options, art
+node tests/levels.test.js     # 26 checks: Levels mode + the Art Kit (headless DOM)
+node tests/art.test.js        # 18 checks: real pixels - silhouettes, contrast, tells, cache
 ```
 Runs the real Descent physics headlessly (no browser needed) and prints one PASS/FAIL line per check (56 at the moment). It covers room data, each ability gate (dash chasm, double-jump ledge, wall shaft, Lantern seal, Lumen catch, Moth Wing and Wall Claw ledge, brittle column, dive shockwave, Bell Hook latch/release/wall stop), combat, the Warden fight, the options, save normalisation, and a random-input fuzz in every room with all abilities. When you add a room or ability, add a check next to the related block, run the file, then commit. Visual changes (art, seals, map) still need a quick look in a browser.
 
